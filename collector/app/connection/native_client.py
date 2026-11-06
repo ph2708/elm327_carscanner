@@ -261,17 +261,33 @@ class NativeELMClient:
         return frame
 
     # ------------------------------------------------------------------
-    # PIDs secundários: carga, avanço, tensão do módulo, sonda pós-cat, MAF...
-    # PIDs que a ECU não suporta são descartados automaticamente.
+    # PIDs secundários lidos em rodízio leve para não sobrecarregar a ECU
     # ------------------------------------------------------------------
     _SLOW_PIDS = [
-        ("0104", "engine_load",    lambda b: round(b[0] * 100.0 / 255.0, 1)),
-        ("010E", "timing_advance", lambda b: round(b[0] / 2.0 - 64.0, 1)),
-        ("0142", "ecu_voltage",    lambda b: round((b[0] * 256 + b[1]) / 1000.0, 2)),
-        ("0115", "o2_b1s2",        lambda b: round(b[0] / 200.0, 3)),
-        ("0110", "maf_gs",         lambda b: round((b[0] * 256 + b[1]) / 100.0, 2)),
-        ("012F", "fuel_level",     lambda b: round(b[0] * 100.0 / 255.0, 1)),
-        ("0133", "baro_kpa",       lambda b: float(b[0])),
+        # Motor & Alimentação
+        ("0104", "engine_load",        lambda b: round(b[0] * 100.0 / 255.0, 1)),
+        ("010E", "timing_advance",     lambda b: round(b[0] / 2.0 - 64.0, 1)),
+        ("0142", "ecu_voltage",        lambda b: round((b[0] * 256 + b[1]) / 1000.0, 2)),
+        ("0115", "o2_b1s2",            lambda b: round(b[0] / 200.0, 3)),
+        ("0110", "maf_gs",             lambda b: round((b[0] * 256 + b[1]) / 100.0, 2)),
+        # Combustível & Injeção
+        ("0152", "ethanol_pct",        lambda b: round(b[0] * 100.0 / 255.0, 1)),
+        ("0123", "fuel_rail_bar",      lambda b: round(((b[0] * 256 + b[1]) * 10) / 100.0, 1)),
+        ("010A", "fuel_pressure_kpa",  lambda b: float(b[0] * 3)),
+        ("015E", "fuel_rate_lh",       lambda b: round((b[0] * 256 + b[1]) * 0.05, 2)),
+        ("012F", "fuel_level",         lambda b: round(b[0] * 100.0 / 255.0, 1)),
+        ("012E", "evap_purge_pct",     lambda b: round(b[0] * 100.0 / 255.0, 1)),
+        # Pedais Acelerador
+        ("0149", "pedal_d",            lambda b: round(b[0] * 100.0 / 255.0, 1)),
+        ("014A", "pedal_e",            lambda b: round(b[0] * 100.0 / 255.0, 1)),
+        # Temperaturas & Ambiente
+        ("015C", "oil_temp",           lambda b: float(b[0] - 40)),
+        ("0146", "ambient_temp",       lambda b: float(b[0] - 40)),
+        ("0133", "baro_kpa",           lambda b: float(b[0])),
+        # Auditoria da ECU / Rodagem
+        ("0121", "distance_mil_km",    lambda b: int(b[0] * 256 + b[1])),
+        ("0131", "distance_cleared_km",lambda b: int(b[0] * 256 + b[1])),
+        ("011F", "engine_runtime_sec", lambda b: int(b[0] * 256 + b[1])),
     ]
 
     def _poll_next_slow_pid(self):
@@ -320,6 +336,27 @@ class NativeELMClient:
             "Aquecedor da Sonda Lambda": "COMPLETO"
         }
         return monitors, mil_on, dtc_count
+
+    def read_vin(self):
+        """Leitura do Chassi / VIN Modo 09 PID 02"""
+        try:
+            resp = self.send_cmd("0902", timeout=2.5)
+            tokens = self._parse_hex_bytes(resp, expected_mode="49")
+            if len(tokens) >= 4:
+                chars = []
+                for t in tokens[2:]:
+                    try:
+                        c = chr(int(t, 16))
+                        if c.isalnum():
+                            chars.append(c)
+                    except Exception:
+                        pass
+                vin = "".join(chars)
+                if len(vin) >= 17:
+                    return vin[-17:]
+        except Exception:
+            pass
+        return ""
 
     def read_dtcs(self):
         """Leitura de codigos de falha armazenados Modo 03"""

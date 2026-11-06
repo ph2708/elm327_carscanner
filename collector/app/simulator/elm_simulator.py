@@ -69,6 +69,18 @@ class ELM327Simulator:
         self.state["maf_gs"] = round(3.1 + load_factor * 16.0, 2)
         self.state["fuel_level"] = 62.0
         self.state["baro_kpa"] = 95.0
+        self.state["ethanol_pct"] = 27.0
+        self.state["fuel_rail_bar"] = round(3.8 + load_factor * 2.5, 1)
+        self.state["fuel_pressure_kpa"] = 380.0
+        self.state["fuel_rate_lh"] = round(0.85 + load_factor * 3.5, 2)
+        self.state["pedal_d"] = self.state["tps"]
+        self.state["pedal_e"] = round(self.state["tps"] / 2.0, 1)
+        self.state["oil_temp"] = min(98.0, 72.0 + elapsed * 0.12)
+        self.state["ambient_temp"] = 26.0
+        self.state["evap_purge_pct"] = round(12.0 + load_factor * 25.0, 1)
+        self.state["distance_mil_km"] = 42
+        self.state["distance_cleared_km"] = 850
+        self.state["engine_runtime_sec"] = int(elapsed)
 
     def process_command(self, cmd_raw: str) -> str:
         """Processa comando AT ou comando hexadecimal OBD"""
@@ -214,7 +226,74 @@ class ELM327Simulator:
 
         # 0120: PIDs suportados 21-40
         elif pid == "20":
-            return "41 20 80 00 00 00\r\n>"
+            return "41 20 FF FF FF FF\r\n>"
+
+        # 0140: PIDs suportados 41-60
+        elif pid == "40":
+            return "41 40 FF FF FF FF\r\n>"
+
+        # 012F: Nível de Combustível (%)
+        elif pid == "2F":
+            val = int(self.state.get("fuel_level", 60) * 255 / 100.0)
+            return f"41 2F {val:02X}\r\n>"
+
+        # 0152: % de Etanol no Tanque (Flex)
+        elif pid == "52":
+            val = int(self.state.get("ethanol_pct", 27) * 255 / 100.0)
+            return f"41 52 {val:02X}\r\n>"
+
+        # 0123: Pressão do Rail de Combustível (bar)
+        elif pid == "23":
+            raw = int((self.state.get("fuel_rail_bar", 4.0) * 100.0) / 10.0)
+            return f"41 23 {(raw >> 8) & 0xFF:02X} {raw & 0xFF:02X}\r\n>"
+
+        # 010A: Pressão da Linha de Combustível (kPa)
+        elif pid == "0A":
+            val = int(self.state.get("fuel_pressure_kpa", 380) / 3.0)
+            return f"41 0A {val:02X}\r\n>"
+
+        # 015E: Taxa de Consumo (L/h)
+        elif pid == "5E":
+            raw = int(self.state.get("fuel_rate_lh", 1.2) / 0.05)
+            return f"41 5E {(raw >> 8) & 0xFF:02X} {raw & 0xFF:02X}\r\n>"
+
+        # 0149 / 014A: Pedal Acelerador D e E
+        elif pid == "49":
+            val = int(self.state.get("pedal_d", 12) * 255 / 100.0)
+            return f"41 49 {val:02X}\r\n>"
+        elif pid == "4A":
+            val = int(self.state.get("pedal_e", 6) * 255 / 100.0)
+            return f"41 4A {val:02X}\r\n>"
+
+        # 015C: Temperatura do Óleo (°C)
+        elif pid == "5C":
+            val = int(self.state.get("oil_temp", 90) + 40)
+            return f"41 5C {val:02X}\r\n>"
+
+        # 0146: Temperatura Ambiente (°C)
+        elif pid == "46":
+            val = int(self.state.get("ambient_temp", 25) + 40)
+            return f"41 46 {val:02X}\r\n>"
+
+        # 012E: Válvula de Purga do Canister (%)
+        elif pid == "2E":
+            val = int(self.state.get("evap_purge_pct", 15) * 255 / 100.0)
+            return f"41 2E {val:02X}\r\n>"
+
+        # 0121: Distância com MIL acesa (km)
+        elif pid == "21":
+            km = self.state.get("distance_mil_km", 42)
+            return f"41 21 {(km >> 8) & 0xFF:02X} {km & 0xFF:02X}\r\n>"
+
+        # 0131: Distância desde limpeza de falhas (km)
+        elif pid == "31":
+            km = self.state.get("distance_cleared_km", 850)
+            return f"41 31 {(km >> 8) & 0xFF:02X} {km & 0xFF:02X}\r\n>"
+
+        # 011F: Tempo de motor ligado (s)
+        elif pid == "1F":
+            sec = self.state.get("engine_runtime_sec", 120)
+            return f"41 1F {(sec >> 8) & 0xFF:02X} {sec & 0xFF:02X}\r\n>"
 
         return "NO DATA\r\n>"
 

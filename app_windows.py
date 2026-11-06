@@ -69,28 +69,47 @@ def F(size=12, bold=False, mono=False):
 
 # Definição de todos os parâmetros exibidos (chave, rótulo, unidade, formato, seção, escala da barra)
 PARAMS = [
-    # Elétrica
+    # Elétrica & Sensores
     ("battery_voltage", "Tensão Bateria / Alternador (pino 16)", "V", "{:.1f}", "⚡ ELÉTRICA & SENSORES", (10, 16)),
     ("ecu_voltage", "Tensão de Alimentação do Módulo (PID 42)", "V", "{:.2f}", "⚡ ELÉTRICA & SENSORES", (10, 16)),
     ("o2_b1s1", "Sonda Lambda Pré-Cat (B1S1)", "V", "{:.2f}", "⚡ ELÉTRICA & SENSORES", (0, 1)),
     ("o2_b1s2", "Sonda Lambda Pós-Cat (B1S2)", "V", "{:.3f}", "⚡ ELÉTRICA & SENSORES", (0, 1)),
     ("tps", "Posição da Borboleta (TPS)", "%", "{:.1f}", "⚡ ELÉTRICA & SENSORES", (0, 100)),
+    ("pedal_d", "Pedal do Acelerador - Pista D", "%", "{:.1f}", "⚡ ELÉTRICA & SENSORES", (0, 100)),
+    ("pedal_e", "Pedal do Acelerador - Pista E", "%", "{:.1f}", "⚡ ELÉTRICA & SENSORES", (0, 100)),
+
     # Motor
-    ("rpm", "Rotação do Motor", "RPM", "{:.0f}", "⚙️ MOTOR", (0, 7000)),
-    ("engine_load", "Carga Calculada do Motor", "%", "{:.0f}", "⚙️ MOTOR", (0, 100)),
-    ("map_kpa", "Pressão do Coletor (MAP)", "kPa", "{:.0f}", "⚙️ MOTOR", (10, 105)),
-    ("maf_gs", "Fluxo de Ar (MAF)", "g/s", "{:.2f}", "⚙️ MOTOR", (0, 60)),
-    ("timing_advance", "Avanço de Ignição", "°", "{:.1f}", "⚙️ MOTOR", (-10, 45)),
-    ("speed", "Velocidade", "km/h", "{:.0f}", "⚙️ MOTOR", (0, 200)),
-    # Temperaturas
+    ("rpm", "Rotação do Motor", "RPM", "{:.0f}", "⚙️ MOTOR & DINÂMICA", (0, 7000)),
+    ("engine_load", "Carga Calculada do Motor", "%", "{:.0f}", "⚙️ MOTOR & DINÂMICA", (0, 100)),
+    ("map_kpa", "Pressão do Coletor (MAP)", "kPa", "{:.0f}", "⚙️ MOTOR & DINÂMICA", (10, 105)),
+    ("maf_gs", "Fluxo de Ar (MAF)", "g/s", "{:.2f}", "⚙️ MOTOR & DINÂMICA", (0, 60)),
+    ("timing_advance", "Avanço de Ignição", "°", "{:.1f}", "⚙️ MOTOR & DINÂMICA", (-10, 45)),
+    ("speed", "Velocidade", "km/h", "{:.0f}", "⚙️ MOTOR & DINÂMICA", (0, 200)),
+
+    # Combustível & Injeção
+    ("ethanol_pct", "Porcentagem de Etanol no Tanque (Flex)", "%", "{:.1f}", "⛽ COMBUSTÍVEL & CONSUMO", (0, 100)),
+    ("fuel_rail_bar", "Pressão do Rail de Combustível (GDI/Diesel)", "bar", "{:.1f}", "⛽ COMBUSTÍVEL & CONSUMO", (0, 250)),
+    ("fuel_pressure_kpa", "Pressão da Linha de Combustível (Baixa)", "kPa", "{:.0f}", "⛽ COMBUSTÍVEL & CONSUMO", (0, 600)),
+    ("fuel_rate_lh", "Taxa de Consumo Instantâneo (L/h)", "L/h", "{:.2f}", "⛽ COMBUSTÍVEL & CONSUMO", (0, 30)),
+    ("fuel_level", "Nível de Combustível no Tanque", "%", "{:.0f}", "⛽ COMBUSTÍVEL & CONSUMO", (0, 100)),
+    ("evap_purge_pct", "Abertura Válvula Purga Canister", "%", "{:.1f}", "⛽ COMBUSTÍVEL & CONSUMO", (0, 100)),
+
+    # Temperaturas & Ambiente
     ("coolant_temp", "Temperatura do Líquido de Arrefecimento", "°C", "{:.0f}", "🌡️ TEMPERATURAS & AMBIENTE", (0, 120)),
+    ("oil_temp", "Temperatura do Óleo do Motor", "°C", "{:.0f}", "🌡️ TEMPERATURAS & AMBIENTE", (0, 150)),
     ("intake_temp", "Temperatura do Ar de Admissão (IAT)", "°C", "{:.0f}", "🌡️ TEMPERATURAS & AMBIENTE", (-10, 80)),
-    ("baro_kpa", "Pressão Barométrica", "kPa", "{:.0f}", "🌡️ TEMPERATURAS & AMBIENTE", (60, 105)),
-    ("fuel_level", "Nível de Combustível", "%", "{:.0f}", "🌡️ TEMPERATURAS & AMBIENTE", (0, 100)),
+    ("ambient_temp", "Temperatura do Ar Ambiente", "°C", "{:.0f}", "🌡️ TEMPERATURAS & AMBIENTE", (-10, 60)),
+    ("baro_kpa", "Pressão Barométrica Atmosférica", "kPa", "{:.0f}", "🌡️ TEMPERATURAS & AMBIENTE", (60, 105)),
+
     # Mistura
     ("stft_b1", "Ajuste Curto Prazo (STFT B1)", "%", "{:+.1f}", "🔥 MISTURA AR/COMBUSTÍVEL", (-25, 25)),
     ("ltft_b1", "Ajuste Longo Prazo (LTFT B1)", "%", "{:+.1f}", "🔥 MISTURA AR/COMBUSTÍVEL", (-25, 25)),
     ("trim_total", "Ajuste Total (STFT + LTFT)", "%", "{:+.1f}", "🔥 MISTURA AR/COMBUSTÍVEL", (-25, 25)),
+
+    # Auditoria da ECU
+    ("distance_mil_km", "Distância Rodada com Luz Injeção Acesa", "km", "{:.0f}", "⏱️ AUDITORIA & HISTÓRICO DA ECU", (0, 5000)),
+    ("distance_cleared_km", "Distância desde Limpeza de Falhas", "km", "{:.0f}", "⏱️ AUDITORIA & HISTÓRICO DA ECU", (0, 10000)),
+    ("engine_runtime_sec", "Tempo de Motor em Funcionamento", "s", "{:.0f}", "⏱️ AUDITORIA & HISTÓRICO DA ECU", (0, 36000)),
 ]
 PARAM_BY_KEY = {p[0]: p for p in PARAMS}
 
@@ -864,6 +883,14 @@ class AutoScanWindowsApp(ctk.CTk):
             return t("coolant_temp", 82, 103) if running else None
         if key == "intake_temp":
             return (-10, 70)
+        if key == "ambient_temp":
+            return (-10, 50)
+        if key == "oil_temp":
+            return (80, 115) if running else None
+        if key == "fuel_level":
+            return (15, 100)
+        if key == "distance_mil_km":
+            return (0, 0)
         if key in ("stft_b1", "ltft_b1"):
             return (-10, 10) if running else None
         if key == "trim_total":
