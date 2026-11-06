@@ -19,6 +19,7 @@ import os
 import csv
 import time
 import json
+import math
 import threading
 import asyncio
 from collections import deque
@@ -117,8 +118,9 @@ PAGES = [
     ("garage", "🚗  Garagem"),
     ("dashboard", "📊  Painel"),
     ("live", "📋  Dados ao Vivo"),
-    ("ai", "🤖  Assistente IA"),
     ("charts", "📈  Gráficos"),
+    ("compare", "⚖️  Comparativo"),
+    ("ai", "🤖  Assistente IA"),
     ("report", "📑  Laudo Test-Drive"),
     ("history", "🗂️  Histórico"),
     ("manual", "📖  Manual"),
@@ -246,8 +248,9 @@ class AutoScanWindowsApp(ctk.CTk):
         self._build_garage_page(self.pages["garage"])
         self._build_dashboard_page(self.pages["dashboard"])
         self._build_live_page(self.pages["live"])
-        self._build_ai_page(self.pages["ai"])
         self._build_charts_page(self.pages["charts"])
+        self._build_compare_page(self.pages["compare"])
+        self._build_ai_page(self.pages["ai"])
         self._build_report_page(self.pages["report"])
         self._build_history_page(self.pages["history"])
         self._build_manual_page(self.pages["manual"])
@@ -335,7 +338,12 @@ class AutoScanWindowsApp(ctk.CTk):
         self.btn_read_dtc = ctk.CTkButton(bar, text="⚠️ Falhas", width=90, height=32, font=F(12),
                                           fg_color="#d97706", hover_color="#b45309", state="disabled",
                                           command=self._read_dtcs_dialog)
-        self.btn_read_dtc.grid(row=0, column=8, padx=(2, 10))
+        self.btn_read_dtc.grid(row=0, column=8, padx=2)
+
+        self.btn_snapshot = ctk.CTkButton(bar, text="📸 Snapshot", width=105, height=32, font=F(12, True),
+                                          fg_color="#0284c7", hover_color="#0369a1",
+                                          command=self._open_snapshot_capture_dialog)
+        self.btn_snapshot.grid(row=0, column=9, padx=(2, 10))
 
     def _show_page(self, key):
         self.current_page = key
@@ -347,6 +355,8 @@ class AutoScanWindowsApp(ctk.CTk):
                 btn.configure(fg_color="transparent", text_color="#cbd5e1")
         if key == "charts":
             self._redraw_charts_now()
+        if key == "compare":
+            self._refresh_compare_page()
         if key == "live" and self.latest_telemetry:
             self._update_live_table(self.latest_telemetry)
 
@@ -1098,6 +1108,9 @@ class AutoScanWindowsApp(ctk.CTk):
         if hasattr(self, "lbl_hist_title"):
             self.lbl_hist_title.configure(text=f"Histórico de diagnósticos — {self.active_plate}")
             self._refresh_history_view()
+        if hasattr(self, "lbl_compare_title"):
+            self.lbl_compare_title.configure(text=f"Comparativo Antes & Depois — {self.active_plate}")
+            self._refresh_compare_page()
         self.minmax.clear()
 
     # ==========================================================
@@ -1517,14 +1530,27 @@ class AutoScanWindowsApp(ctk.CTk):
     def _build_charts_page(self, page):
         page.grid_columnconfigure(0, weight=1)
         page.grid_rowconfigure(2, weight=1)
-        self._page_header(page, "Gráficos", "Ao vivo: últimos 60 segundos  •  Test-Drive: sessão gravada completa")
+        self._page_header(page, "Osciloscópio & Gráficos de Telemetria",
+                          "Ao vivo: últimos 60 segundos  •  Test-Drive: gravação completa  •  Canais configuráveis")
 
         bar = ctk.CTkFrame(page, fg_color="transparent")
         bar.grid(row=1, column=0, sticky="ew", pady=(0, 6))
+
         self.seg_chart = ctk.CTkSegmentedButton(bar, values=["Ao vivo (60 s)", "Último Test-Drive"],
                                                 command=self._on_chart_mode)
         self.seg_chart.set("Ao vivo (60 s)")
         self.seg_chart.pack(side="left")
+
+        self.seg_chart_preset = ctk.CTkSegmentedButton(
+            bar, values=["🎛️ Multicanal", "⚡ Elétrica", "🔥 Injeção & Sonda", "🌡️ Térmica"],
+            command=lambda v: self._redraw_charts_now())
+        self.seg_chart_preset.set("🎛️ Multicanal")
+        self.seg_chart_preset.pack(side="left", padx=10)
+
+        self.btn_chart_freeze = ctk.CTkButton(
+            bar, text="⏸ Congelar", width=95, height=28, fg_color="#334155", hover_color="#475569",
+            command=self._toggle_chart_freeze)
+        self.btn_chart_freeze.pack(side="right")
 
         holder = ctk.CTkFrame(page, fg_color=PANEL, corner_radius=10, border_width=1, border_color=BORDER)
         holder.grid(row=2, column=0, sticky="nsew")
@@ -1535,6 +1561,14 @@ class AutoScanWindowsApp(ctk.CTk):
         self.canvas = FigureCanvasTkAgg(self.fig, master=holder)
         self.canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
         self._draw_charts([], "Aguardando dados...")
+
+    def _toggle_chart_freeze(self):
+        self.chart_frozen = not getattr(self, "chart_frozen", False)
+        if self.chart_frozen:
+            self.btn_chart_freeze.configure(text="▶ Retomar", fg_color="#16a34a", hover_color="#15803d")
+        else:
+            self.btn_chart_freeze.configure(text="⏸ Congelar", fg_color="#334155", hover_color="#475569")
+            self._redraw_charts_now()
 
     def _on_chart_mode(self, value):
         self.chart_mode_live = value.startswith("Ao vivo")
@@ -1550,7 +1584,7 @@ class AutoScanWindowsApp(ctk.CTk):
 
     def _live_chart_tick(self):
         try:
-            if self.current_page == "charts" and self.chart_mode_live and self.is_connected:
+            if self.current_page == "charts" and self.chart_mode_live and self.is_connected and not getattr(self, "chart_frozen", False):
                 self._redraw_charts_now()
         finally:
             self.after(1000, self._live_chart_tick)
@@ -1559,53 +1593,695 @@ class AutoScanWindowsApp(ctk.CTk):
         fig = self.fig
         fig.clf()
         axes = fig.subplots(3, 1, sharex=True)
+        preset = getattr(self, "seg_chart_preset", None)
+        preset_mode = preset.get() if preset else "🎛️ Multicanal"
+
         for ax in axes:
-            ax.set_facecolor("#0f172a")
-            ax.grid(True, color="#1f2937", linestyle="--")
+            ax.set_facecolor("#090d16")
+            ax.grid(True, color="#1e293b", linestyle="-", linewidth=0.7, alpha=0.6)
             ax.tick_params(colors="#94a3b8", labelsize=8)
             for s in ax.spines.values():
-                s.set_color("#1f2937")
-        fig.suptitle(f"{title} — {self.active_plate}", color="#e2e8f0", fontsize=10)
+                s.set_color("#1e293b")
+        fig.suptitle(f"{title} — {self.active_plate} [{preset_mode}]", color="#e2e8f0", fontsize=10, weight="bold")
 
         if frames:
             t0 = frames[0].get("t", 0)
             ts = [fr.get("t", t0 + i * 0.2) - t0 for i, fr in enumerate(frames)]
+            latest = frames[-1]
 
             def series(k):
-                return [fr.get(k, float("nan")) for fr in frames]
+                raw = [fr.get(k, float("nan")) for fr in frames]
+                clean = [v for v in raw if v is not None and not math.isnan(v)]
+                return raw, clean
 
-            ax = axes[0]
-            ax.plot(ts, series("rpm"), color="#38bdf8", lw=1.4)
-            ax.set_ylabel("RPM", color="#38bdf8", fontsize=8)
-            tw = ax.twinx()
-            tw.plot(ts, series("speed"), color="#4ade80", lw=1.2)
-            tw.set_ylabel("km/h", color="#4ade80", fontsize=8)
-            tw.tick_params(colors="#94a3b8", labelsize=8)
+            if preset_mode == "⚡ Elétrica":
+                # Subplot 1: Bateria pino 16
+                raw_bat, cln_bat = series("battery_voltage")
+                cur_bat = latest.get("battery_voltage", 0.0)
+                ax = axes[0]
+                ax.plot(ts, raw_bat, color="#facc15", lw=1.8, label="Bateria")
+                ax.axhspan(13.5, 14.8, color="#22c55e", alpha=0.12)
+                ax.axhspan(11.8, 12.8, color="#38bdf8", alpha=0.08)
+                ax.set_ylim(10.0, 16.0)
+                ax.set_ylabel("Bateria V", color="#facc15", fontsize=8)
+                ax.set_title(f"● Tensão Bateria / Alternador: {cur_bat:.1f} V   (Faixa Carga: 13.5V – 14.8V)",
+                             color="#e2e8f0", fontsize=9, loc="left", pad=4)
 
-            ax = axes[1]
-            ax.plot(ts, series("coolant_temp"), color="#f87171", lw=1.4)
-            ax.set_ylabel("Água °C", color="#f87171", fontsize=8)
-            tw = ax.twinx()
-            tw.plot(ts, series("trim_total"), color="#facc15", lw=1.1, ls=":")
-            lim = self.active_tolerances.get("fuel_trim_total", {"max": 10})["max"]
-            tw.axhline(lim, color=RED, ls="--", alpha=0.5)
-            tw.axhline(-lim, color=RED, ls="--", alpha=0.5)
-            tw.set_ylabel("Trim %", color="#facc15", fontsize=8)
-            tw.tick_params(colors="#94a3b8", labelsize=8)
+                # Subplot 2: Tensão ECU vs Bateria (queda de chicote)
+                raw_ecu, cln_ecu = series("ecu_voltage")
+                cur_ecu = latest.get("ecu_voltage", 0.0)
+                drop = abs(cur_bat - cur_ecu) if (cur_bat and cur_ecu) else 0.0
+                ax = axes[1]
+                ax.plot(ts, raw_ecu, color="#38bdf8", lw=1.8, label="ECU")
+                ax.plot(ts, raw_bat, color="#facc15", lw=1.0, ls="--", alpha=0.6, label="Bateria Ref.")
+                ax.set_ylim(10.0, 16.0)
+                ax.set_ylabel("ECU V", color="#38bdf8", fontsize=8)
+                ax.set_title(f"● Alimentação ECU: {cur_ecu:.2f} V   |   Queda Linha/Chicote: {drop:.2f} V",
+                             color="#e2e8f0", fontsize=9, loc="left", pad=4)
 
-            ax = axes[2]
-            ax.plot(ts, series("battery_voltage"), color="#facc15", lw=1.4)
-            ax.axhspan(13.5, 14.8, color="#22c55e", alpha=0.08)
-            ax.set_ylabel("Bateria V", color="#facc15", fontsize=8)
-            tw = ax.twinx()
-            tw.plot(ts, series("o2_b1s1"), color="#2dd4bf", lw=1.0)
-            tw.set_ylim(0, 1.0)
-            tw.set_ylabel("Sonda V", color="#2dd4bf", fontsize=8)
-            tw.tick_params(colors="#94a3b8", labelsize=8)
-            ax.set_xlabel("segundos", color="#94a3b8", fontsize=8)
+                # Subplot 3: Avanço de Ignição & RPM
+                raw_ign, _ = series("timing_advance")
+                raw_rpm, cln_rpm = series("rpm")
+                cur_ign = latest.get("timing_advance", 0.0)
+                cur_rpm = latest.get("rpm", 0.0)
+                ax = axes[2]
+                ax.plot(ts, raw_ign, color="#a78bfa", lw=1.6)
+                ax.set_ylabel("Avanço °", color="#a78bfa", fontsize=8)
+                ax.set_ylim(-10, 45)
+                tw = ax.twinx()
+                tw.plot(ts, raw_rpm, color="#38bdf8", lw=1.2, ls=":")
+                tw.set_ylabel("RPM", color="#38bdf8", fontsize=8)
+                max_rpm = max(cln_rpm) if cln_rpm else 1200
+                tw.set_ylim(bottom=0, top=max(1200, max_rpm * 1.15))
+                tw.tick_params(colors="#94a3b8", labelsize=8)
+                ax.set_title(f"● Avanço Ignição: {cur_ign:.1f}°   |   ● Rotação: {cur_rpm:.0f} RPM",
+                             color="#e2e8f0", fontsize=9, loc="left", pad=4)
+                ax.set_xlabel("segundos decorridos", color="#94a3b8", fontsize=8)
+
+            elif preset_mode == "🔥 Injeção & Sonda":
+                # Subplot 1: Sonda Lambda B1S1 e B1S2
+                raw_o1, _ = series("o2_b1s1")
+                raw_o2, _ = series("o2_b1s2")
+                cur_o1 = latest.get("o2_b1s1", 0.0)
+                cur_o2 = latest.get("o2_b1s2", 0.0)
+                ax = axes[0]
+                ax.plot(ts, raw_o1, color="#2dd4bf", lw=1.8, label="Pré B1S1")
+                ax.plot(ts, raw_o2, color="#a78bfa", lw=1.2, ls="--", label="Pós B1S2")
+                ax.axhline(0.1, color="gray40", ls=":", lw=0.8)
+                ax.axhline(0.9, color="gray40", ls=":", lw=0.8)
+                ax.set_ylim(0.0, 1.05)
+                ax.set_ylabel("Sonda V", color="#2dd4bf", fontsize=8)
+                ax.set_title(f"● Sonda Pré B1S1: {cur_o1:.2f} V   |   ● Sonda Pós B1S2: {cur_o2:.2f} V",
+                             color="#e2e8f0", fontsize=9, loc="left", pad=4)
+
+                # Subplot 2: STFT & LTFT
+                raw_s, _ = series("stft_b1")
+                raw_l, _ = series("ltft_b1")
+                cur_s = latest.get("stft_b1", 0.0)
+                cur_l = latest.get("ltft_b1", 0.0)
+                ax = axes[1]
+                ax.plot(ts, raw_s, color="#38bdf8", lw=1.6, label="STFT B1")
+                ax.plot(ts, raw_l, color="#f87171", lw=1.6, label="LTFT B1")
+                ax.axhline(0, color="gray40", lw=0.8)
+                ax.axhline(10, color=RED, ls="--", alpha=0.5)
+                ax.axhline(-10, color=RED, ls="--", alpha=0.5)
+                ax.set_ylim(-25.0, 25.0)
+                ax.set_ylabel("Ajuste %", color="#38bdf8", fontsize=8)
+                ax.set_title(f"● Curto Prazo (STFT): {cur_s:+.1f}%   |   ● Longo Prazo (LTFT): {cur_l:+.1f}%",
+                             color="#e2e8f0", fontsize=9, loc="left", pad=4)
+
+                # Subplot 3: Trim Total & Vácuo MAP
+                raw_trm, _ = series("trim_total")
+                raw_map, cln_map = series("map_kpa")
+                cur_trm = latest.get("trim_total", 0.0)
+                cur_map = latest.get("map_kpa", 0.0)
+                ax = axes[2]
+                ax.plot(ts, raw_trm, color="#facc15", lw=1.8)
+                ax.axhline(0, color="gray40", lw=0.8)
+                ax.axhspan(-10, 10, color="#22c55e", alpha=0.08)
+                ax.set_ylim(-25.0, 25.0)
+                ax.set_ylabel("Trim Total %", color="#facc15", fontsize=8)
+                tw = ax.twinx()
+                tw.plot(ts, raw_map, color="#fb923c", lw=1.2)
+                tw.set_ylabel("MAP kPa", color="#fb923c", fontsize=8)
+                tw.set_ylim(10, 105)
+                tw.tick_params(colors="#94a3b8", labelsize=8)
+                ax.set_title(f"● Trim Total: {cur_trm:+.1f}%   |   ● Pressão Coletor (MAP): {cur_map:.0f} kPa",
+                             color="#e2e8f0", fontsize=9, loc="left", pad=4)
+                ax.set_xlabel("segundos decorridos", color="#94a3b8", fontsize=8)
+
+            elif preset_mode == "🌡️ Térmica":
+                # Subplot 1: Água do Arrefecimento
+                raw_clt, cln_clt = series("coolant_temp")
+                cur_clt = latest.get("coolant_temp", 0.0)
+                ax = axes[0]
+                ax.plot(ts, raw_clt, color="#f87171", lw=1.8)
+                ax.axhspan(82, 103, color="#22c55e", alpha=0.12)
+                max_clt = max(cln_clt) if cln_clt else 105
+                ax.set_ylim(bottom=0, top=max(115, max_clt + 10))
+                ax.set_ylabel("Água °C", color="#f87171", fontsize=8)
+                ax.set_title(f"● Temp. Líquido Arrefecimento: {cur_clt:.0f} °C   (Faixa Operacional: 82°C – 103°C)",
+                             color="#e2e8f0", fontsize=9, loc="left", pad=4)
+
+                # Subplot 2: Ar de Admissão IAT vs Ambiente
+                raw_iat, _ = series("intake_temp")
+                raw_amb, _ = series("ambient_temp")
+                cur_iat = latest.get("intake_temp", 0.0)
+                cur_amb = latest.get("ambient_temp", 0.0)
+                ax = axes[1]
+                ax.plot(ts, raw_iat, color="#38bdf8", lw=1.8, label="IAT")
+                ax.plot(ts, raw_amb, color="#4ade80", lw=1.2, ls="--", label="Ambiente")
+                ax.set_ylim(-10, 80)
+                ax.set_ylabel("Ar °C", color="#38bdf8", fontsize=8)
+                ax.set_title(f"● Temp. Ar Admissão (IAT): {cur_iat:.0f} °C   |   ● Temp. Ambiente: {cur_amb:.0f} °C",
+                             color="#e2e8f0", fontsize=9, loc="left", pad=4)
+
+                # Subplot 3: Temperatura do Óleo vs RPM
+                raw_oil, cln_oil = series("oil_temp")
+                raw_rpm, cln_rpm = series("rpm")
+                cur_oil = latest.get("oil_temp", 0.0)
+                cur_rpm = latest.get("rpm", 0.0)
+                ax = axes[2]
+                ax.plot(ts, raw_oil, color="#fb923c", lw=1.8)
+                max_oil = max(cln_oil) if cln_oil else 110
+                ax.set_ylim(bottom=0, top=max(130, max_oil + 10))
+                ax.set_ylabel("Óleo °C", color="#fb923c", fontsize=8)
+                tw = ax.twinx()
+                tw.plot(ts, raw_rpm, color="#38bdf8", lw=1.0, ls=":")
+                max_rpm = max(cln_rpm) if cln_rpm else 1200
+                tw.set_ylim(bottom=0, top=max(1200, max_rpm * 1.15))
+                tw.set_ylabel("RPM", color="#38bdf8", fontsize=8)
+                tw.tick_params(colors="#94a3b8", labelsize=8)
+                ax.set_title(f"● Temp. Óleo do Motor: {cur_oil:.0f} °C   |   ● Rotação: {cur_rpm:.0f} RPM",
+                             color="#e2e8f0", fontsize=9, loc="left", pad=4)
+                ax.set_xlabel("segundos decorridos", color="#94a3b8", fontsize=8)
+
+            else:
+                # Padrão: 🎛️ Multicanal Geral (SEM ESCALA NEGATIVA PARA VELOCIDADE/RPM)
+                raw_rpm, cln_rpm = series("rpm")
+                raw_spd, cln_spd = series("speed")
+                cur_rpm = latest.get("rpm", 0.0)
+                cur_spd = latest.get("speed", 0.0)
+                ax = axes[0]
+                ax.plot(ts, raw_rpm, color="#38bdf8", lw=1.8)
+                max_rpm = max(cln_rpm) if cln_rpm else 1200
+                ax.set_ylim(bottom=0, top=max(1200, max_rpm * 1.15))
+                ax.set_ylabel("RPM", color="#38bdf8", fontsize=8)
+                tw = ax.twinx()
+                tw.plot(ts, raw_spd, color="#4ade80", lw=1.5)
+                max_spd = max(cln_spd) if cln_spd else 40
+                tw.set_ylim(bottom=0, top=max(40, max_spd * 1.15))
+                tw.set_ylabel("km/h", color="#4ade80", fontsize=8)
+                tw.tick_params(colors="#94a3b8", labelsize=8)
+                ax.set_title(f"● Rotação: {cur_rpm:.0f} RPM   |   ● Velocidade: {cur_spd:.0f} km/h",
+                             color="#e2e8f0", fontsize=9, loc="left", pad=4)
+
+                # Subplot 2: Água e Trim Total
+                raw_clt, cln_clt = series("coolant_temp")
+                raw_trm, _ = series("trim_total")
+                cur_clt = latest.get("coolant_temp", 0.0)
+                cur_trm = latest.get("trim_total", 0.0)
+                ax = axes[1]
+                ax.plot(ts, raw_clt, color="#f87171", lw=1.8)
+                ax.axhspan(82, 103, color="#22c55e", alpha=0.10)
+                max_clt = max(cln_clt) if cln_clt else 105
+                ax.set_ylim(bottom=0, top=max(115, max_clt + 10))
+                ax.set_ylabel("Água °C", color="#f87171", fontsize=8)
+                tw = ax.twinx()
+                tw.plot(ts, raw_trm, color="#facc15", lw=1.3, ls=":")
+                tw.axhline(0, color="gray40", lw=0.8)
+                lim = self.active_tolerances.get("fuel_trim_total", {"max": 10})["max"]
+                tw.axhline(lim, color=RED, ls="--", alpha=0.6)
+                tw.axhline(-lim, color=RED, ls="--", alpha=0.6)
+                tw.set_ylim(-25.0, 25.0)
+                tw.set_ylabel("Trim %", color="#facc15", fontsize=8)
+                tw.tick_params(colors="#94a3b8", labelsize=8)
+                ax.set_title(f"● Temperatura Água: {cur_clt:.0f} °C   |   ● Trim Total (STFT+LTFT): {cur_trm:+.1f} %",
+                             color="#e2e8f0", fontsize=9, loc="left", pad=4)
+
+                # Subplot 3: Bateria e Sonda Lambda
+                raw_bat, _ = series("battery_voltage")
+                raw_o2, _ = series("o2_b1s1")
+                cur_bat = latest.get("battery_voltage", 0.0)
+                cur_o2 = latest.get("o2_b1s1", 0.0)
+                ax = axes[2]
+                ax.plot(ts, raw_bat, color="#facc15", lw=1.8)
+                ax.axhspan(13.5, 14.8, color="#22c55e", alpha=0.12)
+                ax.axhspan(11.8, 12.8, color="#38bdf8", alpha=0.08)
+                ax.set_ylim(10.0, 16.0)
+                ax.set_ylabel("Bateria V", color="#facc15", fontsize=8)
+                tw = ax.twinx()
+                tw.plot(ts, raw_o2, color="#2dd4bf", lw=1.4)
+                tw.axhline(0.1, color="gray40", ls=":", lw=0.8)
+                tw.axhline(0.9, color="gray40", ls=":", lw=0.8)
+                tw.set_ylim(0.0, 1.05)
+                tw.set_ylabel("Sonda V", color="#2dd4bf", fontsize=8)
+                tw.tick_params(colors="#94a3b8", labelsize=8)
+                ax.set_title(f"● Tensão Bateria: {cur_bat:.1f} V (Alternador/Chave)   |   ● Sonda Lambda: {cur_o2:.2f} V",
+                             color="#e2e8f0", fontsize=9, loc="left", pad=4)
+                ax.set_xlabel("segundos decorridos", color="#94a3b8", fontsize=8)
 
         fig.tight_layout()
         self.canvas.draw_idle()
+
+    # ==========================================================
+    # PÁGINA: COMPARATIVO ANTES & DEPOIS
+    # ==========================================================
+    def _build_compare_page(self, page):
+        page.grid_columnconfigure(0, weight=1)
+        page.grid_rowconfigure(2, weight=1)
+
+        _, self.lbl_compare_title, _ = self._page_header(
+            page, f"Comparativo Antes & Depois — {self.active_plate}",
+            "Capture fotos de diagnóstico (frio, quente, entrada com defeito, pós-reparo) e compare a evolução lado a lado")
+
+        # Barra de Controles e Seleção
+        act_bar = ctk.CTkFrame(page, fg_color=PANEL, corner_radius=10, border_width=1, border_color=BORDER)
+        act_bar.grid(row=1, column=0, sticky="ew", pady=(0, 8))
+        act_bar.grid_columnconfigure(5, weight=1)
+
+        ctk.CTkButton(act_bar, text="📸 Capturar Snapshot Agora", height=34, font=F(12, True),
+                      fg_color="#059669", hover_color="#047857",
+                      command=self._open_snapshot_capture_dialog).pack(side="left", padx=10, pady=8)
+
+        ctk.CTkLabel(act_bar, text="Antes (Foto A):", font=F(11, True), text_color=MUTED).pack(side="left", padx=(8, 4))
+        self.combo_snap_a = ctk.CTkComboBox(act_bar, values=["Sem fotos salvas"], width=230, height=32, font=F(11))
+        self.combo_snap_a.pack(side="left", padx=(0, 10))
+
+        ctk.CTkLabel(act_bar, text="Depois (Foto B):", font=F(11, True), text_color=MUTED).pack(side="left", padx=(0, 4))
+        self.combo_snap_b = ctk.CTkComboBox(act_bar, values=["Sem fotos salvas"], width=230, height=32, font=F(11))
+        self.combo_snap_b.pack(side="left", padx=(0, 10))
+
+        ctk.CTkButton(act_bar, text="⚖️ Comparar", width=110, height=32, font=F(12, True),
+                      fg_color="#2563eb", hover_color="#1d4ed8",
+                      command=self._do_compare_snapshots).pack(side="left", padx=(0, 6))
+
+        ctk.CTkButton(act_bar, text="📄 Laudo WhatsApp", width=140, height=32, font=F(12),
+                      fg_color="#7c3aed", hover_color="#6d28d9",
+                      command=self._export_compare_report).pack(side="left", padx=(0, 6))
+
+        ctk.CTkButton(act_bar, text="🗑️ Excluir Foto", width=105, height=32, font=F(11),
+                      fg_color="#334155", hover_color="#475569",
+                      command=self._delete_selected_snapshot).pack(side="right", padx=10)
+
+        # Container Principal
+        content_box = ctk.CTkFrame(page, fg_color="transparent")
+        content_box.grid(row=2, column=0, sticky="nsew")
+        content_box.grid_columnconfigure(0, weight=1)
+        content_box.grid_rowconfigure(1, weight=1)
+
+        # 4 Cards de Resumo (KPIs)
+        kpi_frame = ctk.CTkFrame(content_box, fg_color="transparent")
+        kpi_frame.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        kpi_frame.grid_columnconfigure((0, 1, 2, 3), weight=1, uniform="kpi")
+
+        self.kpi_compare = {}
+        kpi_defs = [
+            ("elec", "⚡ ELÉTRICA & TENSÃO", "#facc15"),
+            ("fuel", "⛽ MISTURA (TRIM TOTAL)", "#f472b6"),
+            ("map", "⚙️ VÁCUO COLETOR (MAP)", "#a78bfa"),
+            ("dtc", "🚨 CÓDIGOS DE FALHA (DTCs)", "#ef4444"),
+        ]
+        for idx, (k, title, color) in enumerate(kpi_defs):
+            card = ctk.CTkFrame(kpi_frame, fg_color=PANEL, corner_radius=10, border_width=1, border_color=BORDER)
+            card.grid(row=0, column=idx, sticky="ew", padx=4)
+            card.grid_columnconfigure(0, weight=1)
+            ctk.CTkLabel(card, text=title, font=F(10, True), text_color=MUTED).pack(anchor="w", padx=10, pady=(8, 2))
+            val = ctk.CTkLabel(card, text="-- ➔ --", font=F(15, True), text_color=color)
+            val.pack(anchor="w", padx=10)
+            badge = ctk.CTkLabel(card, text="Aguardando comparação", font=F(10, True), corner_radius=6,
+                                 fg_color="gray25", height=20)
+            badge.pack(anchor="w", padx=10, pady=(4, 8))
+            self.kpi_compare[k] = {"val": val, "badge": badge}
+
+        # Tabela Detalhada Lado a Lado
+        tbl_container = ctk.CTkFrame(content_box, fg_color=PANEL, corner_radius=10, border_width=1, border_color=BORDER)
+        tbl_container.grid(row=1, column=0, sticky="nsew")
+        tbl_container.grid_columnconfigure(0, weight=1)
+        tbl_container.grid_rowconfigure(1, weight=1)
+
+        # Cabeçalho da Tabela
+        tbl_hdr = ctk.CTkFrame(tbl_container, fg_color="#1a2333", height=32, corner_radius=6)
+        tbl_hdr.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 4))
+        tbl_hdr.grid_columnconfigure(0, weight=2)
+        tbl_hdr.grid_columnconfigure((1, 2, 3), weight=1)
+        tbl_hdr.grid_columnconfigure(4, weight=1, minsize=140)
+
+        ctk.CTkLabel(tbl_hdr, text="Parâmetro / Sensor", font=F(11, True), text_color=MUTED, anchor="w").grid(row=0, column=0, sticky="w", padx=12, pady=4)
+        ctk.CTkLabel(tbl_hdr, text="Antes (Foto A)", font=F(11, True), text_color=MUTED).grid(row=0, column=1, padx=6, pady=4)
+        ctk.CTkLabel(tbl_hdr, text="Depois (Foto B)", font=F(11, True), text_color=MUTED).grid(row=0, column=2, padx=6, pady=4)
+        ctk.CTkLabel(tbl_hdr, text="Variação (Delta)", font=F(11, True), text_color=MUTED).grid(row=0, column=3, padx=6, pady=4)
+        ctk.CTkLabel(tbl_hdr, text="Diagnóstico", font=F(11, True), text_color=MUTED).grid(row=0, column=4, padx=6, pady=4)
+
+        self.scroll_compare = ctk.CTkScrollableFrame(tbl_container, fg_color="transparent")
+        self.scroll_compare.grid(row=1, column=0, sticky="nsew", padx=4, pady=(0, 6))
+        self.scroll_compare.grid_columnconfigure(0, weight=2)
+        self.scroll_compare.grid_columnconfigure((1, 2, 3), weight=1)
+        self.scroll_compare.grid_columnconfigure(4, weight=1, minsize=140)
+
+        self._refresh_compare_page()
+
+    def _refresh_compare_page(self):
+        if not hasattr(self, "combo_snap_a"):
+            return
+        snaps = GarageProfileManager.get_snapshots(self.active_plate)
+        self.snapshots_cache = {f"[{s['date']}] {s['tag']}": s for s in snaps}
+        labels = list(self.snapshots_cache.keys())
+
+        if not labels:
+            self.combo_snap_a.configure(values=["Sem fotos salvas"])
+            self.combo_snap_a.set("Sem fotos salvas")
+            self.combo_snap_b.configure(values=["Sem fotos salvas"])
+            self.combo_snap_b.set("Sem fotos salvas")
+            for w in self.scroll_compare.winfo_children():
+                w.destroy()
+            ctk.CTkLabel(self.scroll_compare,
+                         text=f"Nenhum snapshot salvo ainda para o veículo {self.active_plate}.\n\n"
+                              "Conecte o scanner e clique no botão verde '📸 Capturar Snapshot Agora' acima\n"
+                              "para registrar o estado do carro (ex: Entrada na Oficina, Carro Frio ou Pós-Reparo).",
+                         font=F(12), text_color=MUTED, justify="center").pack(pady=40)
+            return
+
+        self.combo_snap_a.configure(values=labels)
+        self.combo_snap_b.configure(values=labels)
+        self.combo_snap_a.set(labels[0])
+        self.combo_snap_b.set(labels[-1])
+        if len(labels) >= 2:
+            self._do_compare_snapshots()
+
+    def _open_snapshot_capture_dialog(self):
+        cur_f = dict(self.latest_telemetry)
+        if not cur_f:
+            if not msgbox.askyesno("Sem telemetria ao vivo",
+                                   "O scanner não está lendo dados ao vivo no momento.\n"
+                                   "Deseja capturar mesmo assim usando a última telemetria registrada?"):
+                return
+
+        win = ctk.CTkToplevel(self)
+        win.title("📸 Capturar Foto de Diagnóstico (Snapshot)")
+        win.geometry("540x450")
+        win.minsize(480, 400)
+        win.transient(self)
+        win.after(100, win.grab_set)
+
+        ctk.CTkLabel(win, text="📸 Registrar Snapshot de Telemetria", font=F(16, True)).pack(pady=(16, 2))
+        ctk.CTkLabel(win, text=f"Veículo: {self.active_plate} — {self.active_vehicle.get('model_name')[:40]}",
+                     font=F(11), text_color=MUTED).pack(pady=(0, 12))
+
+        box = ctk.CTkFrame(win, fg_color=PANEL, corner_radius=10, border_width=1, border_color=BORDER)
+        box.pack(fill="x", padx=20, pady=4)
+
+        ctk.CTkLabel(box, text="Momento do Diagnóstico:", font=F(11, True), text_color=AMBER).pack(anchor="w", padx=12, pady=(10, 4))
+        tag_var = ctk.StringVar(value="⚠️ Entrada na Oficina (Pré-Manutenção)")
+        tags = [
+            "⚠️ Entrada na Oficina (Pré-Manutenção)",
+            "🧊 Carro Frio (Chave Ligada / Partida)",
+            "🔥 Carro Aquecido (Marcha Lenta)",
+            "✅ Pós-Manutenção (Após Reparo / Entrega)",
+            "📝 Personalizado...",
+        ]
+        combo_tag = ctk.CTkComboBox(box, values=tags, variable=tag_var, width=380, height=32, font=F(11))
+        combo_tag.pack(padx=12, pady=(0, 8), fill="x")
+
+        entry_custom = ctk.CTkEntry(box, placeholder_text="Digite o nome da etiqueta personalizada...", height=30)
+
+        def on_tag_change(val):
+            if val.startswith("📝"):
+                entry_custom.pack(padx=12, pady=(0, 8), fill="x")
+            else:
+                entry_custom.pack_forget()
+        combo_tag.configure(command=on_tag_change)
+
+        ctk.CTkLabel(box, text="Observações do Mecânico / Peças trocadas:", font=F(11, True), text_color=MUTED).pack(anchor="w", padx=12, pady=(4, 2))
+        entry_notes = ctk.CTkEntry(box, placeholder_text="Ex: Substituídas velas, cabos e efetuada limpeza de bicos", height=32)
+        entry_notes.pack(padx=12, pady=(0, 12), fill="x")
+
+        preview = ctk.CTkFrame(win, fg_color="#162033", corner_radius=8)
+        preview.pack(fill="x", padx=20, pady=8)
+        v_bat = cur_f.get("battery_voltage", "--")
+        v_rpm = cur_f.get("rpm", "--")
+        v_map = cur_f.get("map_kpa", "--")
+        v_clt = cur_f.get("coolant_temp", "--")
+        v_trm = cur_f.get("trim_total", "--")
+        ctk.CTkLabel(preview, text=f"⚡ Bateria: {v_bat}V  •  RPM: {v_rpm}  •  MAP: {v_map} kPa  •  Água: {v_clt}°C  •  Trim: {v_trm}%",
+                     font=F(10, True, mono=True), text_color="#38bdf8").pack(pady=8)
+
+        def do_save():
+            chosen = tag_var.get()
+            if chosen.startswith("📝"):
+                custom_txt = entry_custom.get().strip()
+                final_tag = custom_txt if custom_txt else "Snapshot Personalizado"
+            else:
+                final_tag = chosen
+
+            notes = entry_notes.get().strip()
+            dtcs = self._read_dtcs_safe()
+            GarageProfileManager.add_snapshot(self.active_plate, final_tag, cur_f, dtcs=dtcs, notes=notes)
+            self._refresh_compare_page()
+            win.destroy()
+            msgbox.showinfo("Snapshot Registrado", f"Foto de telemetria '{final_tag}' salva para o veículo {self.active_plate}!")
+
+        btn_box = ctk.CTkFrame(win, fg_color="transparent")
+        btn_box.pack(fill="x", padx=20, pady=(8, 12))
+        btn_box.grid_columnconfigure((0, 1), weight=1)
+
+        ctk.CTkButton(btn_box, text="💾 Salvar Foto de Diagnóstico", height=38, font=F(12, True),
+                      fg_color="#059669", hover_color="#047857", command=do_save).grid(row=0, column=0, padx=(0, 4), sticky="ew")
+        ctk.CTkButton(btn_box, text="Cancelar", height=38, font=F(12),
+                      fg_color="#334155", hover_color="#475569", command=win.destroy).grid(row=0, column=1, padx=(4, 0), sticky="ew")
+
+    def _do_compare_snapshots(self):
+        label_a = self.combo_snap_a.get()
+        label_b = self.combo_snap_b.get()
+        snap_a = getattr(self, "snapshots_cache", {}).get(label_a)
+        snap_b = getattr(self, "snapshots_cache", {}).get(label_b)
+
+        if not snap_a or not snap_b:
+            msgbox.showwarning("Aviso", "Selecione duas fotos válidas para comparar.")
+            return
+
+        mA = snap_a.get("metrics", {})
+        mB = snap_b.get("metrics", {})
+        dtcs_A = snap_a.get("dtcs", [])
+        dtcs_B = snap_b.get("dtcs", [])
+
+        # 1. Atualiza 4 KPIs
+        va = mA.get("battery_voltage", 0.0)
+        vb = mB.get("battery_voltage", 0.0)
+        self.kpi_compare["elec"]["val"].configure(text=f"{va:.1f} V ➔ {vb:.1f} V")
+        if vb >= 13.5 and va < 12.5:
+            self.kpi_compare["elec"]["badge"].configure(text=f"🟢 Alternador OK (+{vb-va:.1f}V)", fg_color="#14532d")
+        elif vb >= 13.5:
+            self.kpi_compare["elec"]["badge"].configure(text=f"🟢 Carga Normal ({vb:.1f}V)", fg_color="#14532d")
+        elif vb < 12.0:
+            self.kpi_compare["elec"]["badge"].configure(text=f"🔴 Bateria Baixa ({vb:.1f}V)", fg_color="#7f1d1d")
+        else:
+            self.kpi_compare["elec"]["badge"].configure(text=f"⚪ Repouso Chave ({vb:.1f}V)", fg_color="gray30")
+
+        ta = mA.get("trim_total", 0.0)
+        tb = mB.get("trim_total", 0.0)
+        self.kpi_compare["fuel"]["val"].configure(text=f"{ta:+.1f}% ➔ {tb:+.1f}%")
+        if abs(tb) <= 7.0 and abs(ta) > 10.0:
+            self.kpi_compare["fuel"]["badge"].configure(text=f"🟢 Mistura Corrigida ({tb-ta:+.1f}%)", fg_color="#14532d")
+        elif abs(tb) <= 10.0:
+            self.kpi_compare["fuel"]["badge"].configure(text="🟢 Dentro da Faixa", fg_color="#14532d")
+        else:
+            self.kpi_compare["fuel"]["badge"].configure(text="🔴 Mistura Desregulada", fg_color="#7f1d1d")
+
+        map_a = mA.get("map_kpa", 0.0)
+        map_b = mB.get("map_kpa", 0.0)
+        self.kpi_compare["map"]["val"].configure(text=f"{map_a:.0f} kPa ➔ {map_b:.0f} kPa")
+        if map_a > 45 and map_b <= 40 and mB.get("rpm", 0) > 500:
+            self.kpi_compare["map"]["badge"].configure(text=f"🟢 Vácuo Restaurado (-{map_a-map_b:.0f} kPa)", fg_color="#14532d")
+        elif map_b <= 42 and mB.get("rpm", 0) > 500:
+            self.kpi_compare["map"]["badge"].configure(text="🟢 Vácuo Normal", fg_color="#14532d")
+        else:
+            self.kpi_compare["map"]["badge"].configure(text=f"⚪ Delta {map_b-map_a:+.0f} kPa", fg_color="gray30")
+
+        cnt_a = len(dtcs_A)
+        cnt_b = len(dtcs_B)
+        self.kpi_compare["dtc"]["val"].configure(text=f"{cnt_a} falhas ➔ {cnt_b} falhas")
+        if cnt_a > 0 and cnt_b == 0:
+            self.kpi_compare["dtc"]["badge"].configure(text="🟢 Falhas Eliminadas (0)", fg_color="#14532d")
+        elif cnt_b == 0:
+            self.kpi_compare["dtc"]["badge"].configure(text="🟢 Nenhuma Falha", fg_color="#14532d")
+        else:
+            self.kpi_compare["dtc"]["badge"].configure(text=f"🔴 {cnt_b} Falha(s) Ativa(s)", fg_color="#7f1d1d")
+
+        # 2. Tabela Detalhada
+        for w in self.scroll_compare.winfo_children():
+            w.destroy()
+
+        compare_categories = [
+            ("⚡ ELÉTRICA & TENSÕES", [
+                ("battery_voltage", "Tensão Bateria / Alternador (pino 16)", "V", "{:.1f}"),
+                ("ecu_voltage", "Tensão Alimentação do Módulo (ECU)", "V", "{:.2f}"),
+            ]),
+            ("⛽ COMBUSTÍVEL, INJEÇÃO & MISTURA", [
+                ("trim_total", "Ajuste de Combustível Total (STFT+LTFT)", "%", "{:+.1f}"),
+                ("stft_b1", "Ajuste Curto Prazo (STFT B1)", "%", "{:+.1f}"),
+                ("ltft_b1", "Ajuste Longo Prazo (LTFT B1)", "%", "{:+.1f}"),
+                ("o2_b1s1", "Sonda Lambda Pré-Catalisador (B1S1)", "V", "{:.2f}"),
+                ("o2_b1s2", "Sonda Lambda Pós-Catalisador (B1S2)", "V", "{:.2f}"),
+                ("fuel_rail_bar", "Pressão do Rail / Injeção Direta", "bar", "{:.1f}"),
+                ("fuel_pressure_kpa", "Pressão Linha de Baixa", "kPa", "{:.0f}"),
+                ("fuel_rate_lh", "Consumo Instantâneo", "L/h", "{:.2f}"),
+                ("ethanol_pct", "Porcentagem de Etanol no Tanque", "%", "{:.1f}"),
+            ]),
+            ("⚙️ MOTOR & ADMISSÃO", [
+                ("rpm", "Rotação do Motor", "RPM", "{:.0f}"),
+                ("map_kpa", "Pressão do Coletor (MAP)", "kPa", "{:.0f}"),
+                ("tps", "Abertura da Borboleta (TPS)", "%", "{:.1f}"),
+                ("engine_load", "Carga Calculada do Motor", "%", "{:.0f}"),
+                ("timing_advance", "Avanço de Ignição", "°", "{:.1f}"),
+                ("maf_gs", "Fluxo de Ar (MAF)", "g/s", "{:.2f}"),
+            ]),
+            ("🌡️ TEMPERATURAS", [
+                ("coolant_temp", "Temperatura Líquido Arrefecimento", "°C", "{:.0f}"),
+                ("oil_temp", "Temperatura do Óleo do Motor", "°C", "{:.0f}"),
+                ("intake_temp", "Temperatura do Ar Admissão (IAT)", "°C", "{:.0f}"),
+                ("ambient_temp", "Temperatura Ambiente", "°C", "{:.0f}"),
+            ]),
+        ]
+
+        row = 0
+        for cat_name, fields in compare_categories:
+            ctk.CTkLabel(self.scroll_compare, text=cat_name, font=F(11, True), text_color=AMBER, anchor="w").grid(
+                row=row, column=0, columnspan=5, sticky="ew", padx=8, pady=(10, 4))
+            row += 1
+
+            for key, label, unit, fmt in fields:
+                val_a = mA.get(key)
+                val_b = mB.get(key)
+
+                if val_a is None and val_b is None:
+                    continue
+
+                txt_a = fmt.format(val_a) if val_a is not None else "--"
+                txt_b = fmt.format(val_b) if val_b is not None else "--"
+
+                delta_str = "--"
+                badge_text = "⚪ Estável"
+                badge_color = "gray30"
+
+                if val_a is not None and val_b is not None:
+                    delta = val_b - val_a
+                    delta_str = f"{delta:+.1f} {unit}".replace(".", ",")
+
+                    if key == "trim_total":
+                        if abs(val_b) <= 7.0 and abs(val_a) > 10.0:
+                            badge_text, badge_color = "🟢 Normalizou", "#14532d"
+                        elif abs(val_b) > 15.0:
+                            badge_text, badge_color = "🔴 Fora da faixa", "#7f1d1d"
+                    elif key == "battery_voltage":
+                        if val_b >= 13.5 and val_a < 12.5:
+                            badge_text, badge_color = "🟢 Carregando", "#14532d"
+                        elif val_b < 12.0:
+                            badge_text, badge_color = "🔴 Tensão Baixa", "#7f1d1d"
+                    elif key == "map_kpa":
+                        if val_a > 45 and val_b <= 40 and mB.get("rpm", 0) > 500:
+                            badge_text, badge_color = "🟢 Vácuo OK", "#14532d"
+
+                ctk.CTkLabel(self.scroll_compare, text=f"{label} ({unit})", font=F(12), anchor="w").grid(
+                    row=row, column=0, sticky="w", padx=12, pady=2)
+                ctk.CTkLabel(self.scroll_compare, text=txt_a, font=F(12, True, mono=True), text_color="#94a3b8").grid(
+                    row=row, column=1, padx=6, pady=2)
+                ctk.CTkLabel(self.scroll_compare, text=txt_b, font=F(12, True, mono=True), text_color="white").grid(
+                    row=row, column=2, padx=6, pady=2)
+                ctk.CTkLabel(self.scroll_compare, text=delta_str, font=F(11, mono=True), text_color=ACCENT).grid(
+                    row=row, column=3, padx=6, pady=2)
+                ctk.CTkLabel(self.scroll_compare, text=badge_text, font=F(10, True), corner_radius=6,
+                             fg_color=badge_color, width=120, height=20).grid(row=row, column=4, padx=6, pady=2)
+                row += 1
+
+        if dtcs_A or dtcs_B:
+            ctk.CTkLabel(self.scroll_compare, text="🚨 CÓDIGOS DE FALHA (DTCs)", font=F(11, True), text_color=AMBER, anchor="w").grid(
+                row=row, column=0, columnspan=5, sticky="ew", padx=8, pady=(12, 4))
+            row += 1
+            codes_a = ", ".join([d.get("code", "") for d in dtcs_A]) if dtcs_A else "Nenhuma falha"
+            codes_b = ", ".join([d.get("code", "") for d in dtcs_B]) if dtcs_B else "Nenhuma falha"
+            d_badge = "🟢 Zerado" if (dtcs_A and not dtcs_B) else "⚪ Sem falhas" if (not dtcs_A and not dtcs_B) else "🔴 Falhas ativas"
+            d_color = "#14532d" if (not dtcs_B) else "#7f1d1d"
+
+            ctk.CTkLabel(self.scroll_compare, text="Códigos Registrados", font=F(12), anchor="w").grid(row=row, column=0, sticky="w", padx=12, pady=2)
+            ctk.CTkLabel(self.scroll_compare, text=codes_a, font=F(11, mono=True), text_color=RED if dtcs_A else GREEN).grid(row=row, column=1, padx=6, pady=2)
+            ctk.CTkLabel(self.scroll_compare, text=codes_b, font=F(11, mono=True), text_color=RED if dtcs_B else GREEN).grid(row=row, column=2, padx=6, pady=2)
+            ctk.CTkLabel(self.scroll_compare, text=f"{len(dtcs_B) - len(dtcs_A):+d} falha(s)", font=F(11, mono=True), text_color=ACCENT).grid(row=row, column=3, padx=6, pady=2)
+            ctk.CTkLabel(self.scroll_compare, text=d_badge, font=F(10, True), corner_radius=6, fg_color=d_color, width=120, height=20).grid(row=row, column=4, padx=6, pady=2)
+
+    def _delete_selected_snapshot(self):
+        label = self.combo_snap_a.get()
+        snap = getattr(self, "snapshots_cache", {}).get(label)
+        if not snap:
+            msgbox.showinfo("Aviso", "Nenhum snapshot selecionado para excluir.")
+            return
+        if not msgbox.askyesno("Confirmar Exclusão", f"Deseja realmente excluir a foto '{snap.get('tag')}' de {snap.get('date')}?"):
+            return
+        GarageProfileManager.delete_snapshot(self.active_plate, snap.get("id"))
+        self._refresh_compare_page()
+        msgbox.showinfo("Excluído", "Foto de diagnóstico removida.")
+
+    def _export_compare_report(self):
+        label_a = self.combo_snap_a.get()
+        label_b = self.combo_snap_b.get()
+        snap_a = getattr(self, "snapshots_cache", {}).get(label_a)
+        snap_b = getattr(self, "snapshots_cache", {}).get(label_b)
+
+        if not snap_a or not snap_b:
+            msgbox.showinfo("Aviso", "Selecione duas fotos para gerar o laudo comparativo.")
+            return
+
+        mA = snap_a.get("metrics", {})
+        mB = snap_b.get("metrics", {})
+        dtcs_A = snap_a.get("dtcs", [])
+        dtcs_B = snap_b.get("dtcs", [])
+
+        va = mA.get("battery_voltage", 0.0)
+        vb = mB.get("battery_voltage", 0.0)
+        ta = mA.get("trim_total", 0.0)
+        tb = mB.get("trim_total", 0.0)
+        map_a = mA.get("map_kpa", 0.0)
+        map_b = mB.get("map_kpa", 0.0)
+
+        lines = [
+            "=" * 60,
+            "🚗 AUTOSCAN BR — LAUDO COMPARATIVO DE MANUTENÇÃO",
+            "=" * 60,
+            f"Veículo: {self.active_vehicle.get('model_name')}",
+            f"Placa: {self.active_plate}   |   KM: {self.active_vehicle.get('km')}   |   Ano: {self.active_vehicle.get('year')}",
+            f"Cliente: {self.active_vehicle.get('customer_name') or 'Oficina'}",
+            "",
+            f"FOTO A (ANTES):  {snap_a.get('date')} — {snap_a.get('tag')}",
+            f"Notas: {snap_a.get('notes') or 'Sem observações'}",
+            "",
+            f"FOTO B (DEPOIS): {snap_b.get('date')} — {snap_b.get('tag')}",
+            f"Notas: {snap_b.get('notes') or 'Sem observações'}",
+            "-" * 60,
+            "📊 RESULTADOS COMPROVADOS DO SERVIÇO:",
+            f"• Tensão Bateria / Alternador: {va:.1f} V ➔ {vb:.1f} V",
+            f"• Trim de Combustível (STFT+LTFT): {ta:+.1f}% ➔ {tb:+.1f}%",
+            f"• Pressão no Coletor (MAP): {map_a:.0f} kPa ➔ {map_b:.0f} kPa",
+            f"• Códigos de Falha (DTCs): {len(dtcs_A)} falha(s) ➔ {len(dtcs_B)} falha(s)",
+            "-" * 60,
+            "✅ Diagnóstico e testes validados por AutoScan BR Professional.",
+            "=" * 60,
+        ]
+        text_report = "\n".join(lines)
+
+        win = ctk.CTkToplevel(self)
+        win.title("📄 Laudo Comparativo para o Cliente (WhatsApp / Impressão)")
+        win.geometry("600x480")
+        win.minsize(500, 400)
+        win.transient(self)
+        win.after(100, win.grab_set)
+
+        ctk.CTkLabel(win, text="📄 Laudo Comparativo Pronto para Envio", font=F(15, True)).pack(pady=(14, 4))
+        tb = ctk.CTkTextbox(win, font=F(12, mono=True), corner_radius=8, fg_color=PANEL, border_width=1, border_color=BORDER)
+        tb.pack(fill="both", expand=True, padx=16, pady=8)
+        self._set_readonly_text(tb, text_report)
+
+        btn_row = ctk.CTkFrame(win, fg_color="transparent")
+        btn_row.pack(fill="x", padx=16, pady=(0, 14))
+        btn_row.grid_columnconfigure((0, 1), weight=1)
+
+        def copy_whatsapp():
+            self.clipboard_clear()
+            self.clipboard_append(text_report)
+            msgbox.showinfo("Copiado!", "Texto do laudo copiado para a área de transferência!\nPronto para colar no WhatsApp do cliente.")
+
+        def save_file():
+            p = filedialog.asksaveasfilename(
+                defaultextension=".txt", filetypes=[("Arquivo de Texto", "*.txt")],
+                initialfile=f"laudo_comparativo_{self.active_plate}.txt")
+            if p:
+                with open(p, "w", encoding="utf-8") as f:
+                    f.write(text_report)
+                msgbox.showinfo("Salvo", f"Laudo salvo em:\n{p}")
+
+        ctk.CTkButton(btn_row, text="📋 Copiar para WhatsApp", height=36, font=F(12, True),
+                      fg_color="#22c55e", hover_color="#16a34a", command=copy_whatsapp).grid(row=0, column=0, padx=(0, 6), sticky="ew")
+        ctk.CTkButton(btn_row, text="💾 Salvar em Arquivo (.txt)", height=36, font=F(12),
+                      fg_color="#2563eb", hover_color="#1d4ed8", command=save_file).grid(row=0, column=1, padx=(6, 0), sticky="ew")
 
     # ==========================================================
     # PÁGINA 6: LAUDO

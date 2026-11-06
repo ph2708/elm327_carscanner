@@ -11,7 +11,7 @@ echo [1/3] Finalizando processos anteriores...
 taskkill /F /IM AutoScanBR.exe >nul 2>&1
 
 echo [2/3] Compilando executavel nativo (PyInstaller)...
-python -m PyInstaller --noconfirm --onedir --windowed --name "AutoScanBR" --collect-all customtkinter --collect-all bleak --collect-all serial --collect-all matplotlib --collect-all google_genai --add-data "collector;collector" app_windows.py
+"C:\Users\admin\AppData\Local\Python\bin\python.exe" -m PyInstaller --noconfirm --onedir --windowed --name "AutoScanBR" app_windows.py
 
 if %errorlevel% neq 0 (
     echo [ERRO] Falha na compilacao com PyInstaller!

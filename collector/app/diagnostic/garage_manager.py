@@ -144,3 +144,46 @@ class GarageProfileManager:
             return True
         return False
 
+    @staticmethod
+    def add_snapshot(plate, tag, metrics, dtcs=None, notes=""):
+        db = GarageProfileManager.load_database()
+        plate = plate.upper().strip()
+        if plate in db.get("vehicles", {}):
+            v = db["vehicles"][plate]
+            if "snapshots" not in v:
+                v["snapshots"] = []
+            snap = {
+                "id": f"snap_{int(time.time() * 1000)}",
+                "timestamp": time.time(),
+                "date": time.strftime("%d/%m/%Y %H:%M:%S"),
+                "tag": tag,
+                "notes": notes,
+                "metrics": dict(metrics),
+                "dtcs": list(dtcs or [])
+            }
+            v["snapshots"].append(snap)
+            GarageProfileManager.save_database(db)
+            return snap
+        return None
+
+    @staticmethod
+    def get_snapshots(plate):
+        db = GarageProfileManager.load_database()
+        plate = plate.upper().strip()
+        if plate in db.get("vehicles", {}):
+            return db["vehicles"][plate].get("snapshots", [])
+        return []
+
+    @staticmethod
+    def delete_snapshot(plate, snapshot_id):
+        db = GarageProfileManager.load_database()
+        plate = plate.upper().strip()
+        if plate in db.get("vehicles", {}):
+            v = db["vehicles"][plate]
+            if "snapshots" in v:
+                v["snapshots"] = [s for s in v["snapshots"] if s.get("id") != snapshot_id]
+                GarageProfileManager.save_database(db)
+                return True
+        return False
+
+
