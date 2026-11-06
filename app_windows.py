@@ -931,17 +931,22 @@ class AutoScanWindowsApp(ctk.CTk):
                 ("coolant_temp", "Temperatura Água Arrefecimento", "°C"),
                 ("oil_temp", "Temperatura do Óleo do Motor", "°C"),
                 ("intake_temp", "Temperatura do Ar de Admissão (IAT)", "°C"),
+                ("ambient_temp", "Temperatura Ambiente Operacional", "°C"),
             ]),
             ("⛽ COMBUSTÍVEL, INJEÇÃO & MISTURA", [
                 ("fuel_trim_total", "Ajuste de Combustível Total (Trim)", "%"),
-                ("lambda_o2", "Tensão da Sonda Lambda Pré (O2)", "V"),
+                ("stft_ltft", "Limites Individuais (STFT / LTFT)", "%"),
+                ("lambda_o2", "Tensão Sonda Pré-Catalisador (B1S1)", "V"),
+                ("lambda_o2_post", "Tensão Sonda Pós-Catalisador (B1S2)", "V"),
                 ("fuel_rail_bar", "Pressão do Rail / Flauta (GDI/Diesel)", "bar"),
                 ("fuel_pressure_kpa", "Pressão Linha de Baixa", "kPa"),
                 ("fuel_rate_lh", "Consumo em Marcha Lenta", "L/h"),
                 ("ethanol_pct", "Porcentagem de Etanol Esperada (Flex)", "%"),
+                ("fuel_level", "Nível Mínimo do Tanque de Combustível", "%"),
             ]),
             ("⚡ ELÉTRICA & TENSÕES", [
-                ("battery_voltage", "Tensão com Alternador Carregando", "V"),
+                ("battery_voltage", "Tensão Alternador em Carga (Motor Ligado)", "V"),
+                ("battery_resting_voltage", "Tensão Bateria em Repouso (Chave Ligada)", "V"),
                 ("ecu_voltage", "Tensão de Alimentação da ECU", "V"),
             ]),
         ]
@@ -1113,13 +1118,13 @@ class AutoScanWindowsApp(ctk.CTk):
             return (d["min"], d["max"]) if d else (dmin, dmax)
 
         if key == "battery_voltage":
-            return t("battery_voltage", 13.5, 14.8) if running else (12.2, 12.9)
+            return t("battery_voltage", 13.5, 14.8) if running else t("battery_resting_voltage", 11.8, 12.9)
         if key == "ecu_voltage":
-            return (13.0, 14.8) if running else (11.8, 12.9)
+            return t("ecu_voltage", 13.0, 14.8) if running else (11.8, 12.9)
         if key == "o2_b1s1":
             return t("lambda_o2", 0.1, 0.9) if running else None
         if key == "o2_b1s2":
-            return (0.45, 0.90) if running and f.get("coolant_temp", 0) >= 80 else None
+            return t("lambda_o2_post", 0.45, 0.90) if running and f.get("coolant_temp", 0) >= 80 else None
         if key == "tps":
             return t("idle_tps", 10, 19) if idle else None
         if key == "rpm":
@@ -1139,7 +1144,7 @@ class AutoScanWindowsApp(ctk.CTk):
         if key == "intake_temp":
             return t("intake_temp", -10, 70)
         if key == "ambient_temp":
-            return (-10, 50)
+            return t("ambient_temp", -10, 50)
         if key == "fuel_rail_bar":
             return (tol["fuel_rail_bar"]["min"], tol["fuel_rail_bar"]["max"]) if "fuel_rail_bar" in tol and running else None
         if key == "fuel_pressure_kpa":
@@ -1149,11 +1154,11 @@ class AutoScanWindowsApp(ctk.CTk):
         if key == "ethanol_pct":
             return (tol["ethanol_pct"]["min"], tol["ethanol_pct"]["max"]) if "ethanol_pct" in tol else None
         if key == "fuel_level":
-            return (15, 100)
+            return t("fuel_level", 15, 100)
         if key == "distance_mil_km":
             return (0, 0)
         if key in ("stft_b1", "ltft_b1"):
-            return (-10, 10) if running else None
+            return t("stft_ltft", -10, 10) if running else None
         if key == "trim_total":
             return t("fuel_trim_total", -10, 10) if running else None
         return None
