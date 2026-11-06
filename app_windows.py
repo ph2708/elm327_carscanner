@@ -439,29 +439,77 @@ class AutoScanWindowsApp(ctk.CTk):
         model_box.grid_columnconfigure(0, weight=1)
 
         m_top = ctk.CTkFrame(model_box, fg_color="transparent")
-        m_top.grid(row=0, column=0, sticky="ew")
+        m_top.grid(row=0, column=0, sticky="ew", pady=(0, 2))
         m_top.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(m_top, text="Motorização / Perfil de calibração", font=F(11, True), text_color=MUTED).grid(row=0, column=0, sticky="w")
 
+        btn_catalog = ctk.CTkButton(
+            m_top, text="🔎 Catálogo de Carros", width=140, height=24, font=F(11, True),
+            fg_color="#0284c7", hover_color="#0369a1",
+            command=self._open_model_catalog_dialog
+        )
+        btn_catalog.grid(row=0, column=1, padx=(0, 4))
+
         btn_ai_model = ctk.CTkButton(
-            m_top, text="✨ Gerar Perfil com IA", width=145, height=22, font=F(11, True),
+            m_top, text="✨ Gerar com IA", width=115, height=24, font=F(11, True),
             fg_color="#8b5cf6", hover_color="#7c3aed",
             command=self._open_ai_profile_generator_dialog
         )
-        btn_ai_model.grid(row=0, column=1, padx=(0, 4))
+        btn_ai_model.grid(row=0, column=2, padx=(0, 4))
 
         btn_edit_tol = ctk.CTkButton(
-            m_top, text="✏️ Ajustar Tolerâncias", width=140, height=22, font=F(11),
+            m_top, text="✏️ Ajustar", width=85, height=24, font=F(11),
             fg_color="#334155", hover_color="#475569",
             command=self._open_edit_tolerances_dialog
         )
-        btn_edit_tol.grid(row=0, column=2)
+        btn_edit_tol.grid(row=0, column=3)
 
+        # Barra de Pesquisa de Modelos / Filtro em Tempo Real
+        search_box = ctk.CTkFrame(model_box, fg_color="transparent")
+        search_box.grid(row=1, column=0, sticky="ew", pady=(3, 3))
+        search_box.grid_columnconfigure(0, weight=1)
+
+        self.entry_model_filter = ctk.CTkEntry(
+            search_box, height=32, font=F(12),
+            placeholder_text="🔍 Digite para buscar motor (ex: Onix, Gol, EA111, Fire, Ka, TSI, HB20, BYD, Diesel)..."
+        )
+        self.entry_model_filter.grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        self.entry_model_filter.bind("<KeyRelease>", lambda e: self._on_model_filter_type())
+
+        btn_clear_filter = ctk.CTkButton(
+            search_box, text="✖", width=32, height=32, font=F(11, True),
+            fg_color="#334155", hover_color="#475569",
+            command=self._clear_model_filter
+        )
+        btn_clear_filter.grid(row=0, column=1)
+
+        # Combobox com os modelos filtrados
         self.f_model = ctk.CTkComboBox(
             model_box, height=32, values=list(self.model_options.keys()),
             command=self._update_model_preview
         )
-        self.f_model.grid(row=1, column=0, sticky="ew", pady=(3, 0))
+        self.f_model.grid(row=2, column=0, sticky="ew", pady=(2, 4))
+
+        # Atalhos rápidos de marcas mais comuns em oficinas
+        brand_row = ctk.CTkFrame(model_box, fg_color="transparent")
+        brand_row.grid(row=3, column=0, sticky="ew", pady=(0, 2))
+        quick_brands = [
+            ("Todos", ""),
+            ("Chevrolet", "Chevrolet"),
+            ("VW", "Volkswagen"),
+            ("Fiat/Jeep", "Fiat"),
+            ("Ford", "Ford"),
+            ("Hyundai", "Hyundai"),
+            ("Toyota/Honda", "Toyota"),
+            ("Renault", "Renault"),
+            ("⚡ Elétricos/Híbridos", "Elétrico"),
+        ]
+        for b_name, b_query in quick_brands:
+            ctk.CTkButton(
+                brand_row, text=b_name, height=22, font=F(10),
+                fg_color="#1e293b", hover_color="#334155",
+                command=lambda q=b_query: self._set_brand_filter(q)
+            ).pack(side="left", padx=(0, 4))
 
         self.f_km = field(3, 0, "Quilometragem", lambda p: ctk.CTkEntry(p, height=32, placeholder_text="75000"))
         self.f_customer = field(3, 1, "Cliente / Proprietário", lambda p: ctk.CTkEntry(p, height=32, placeholder_text="Nome do cliente"))
@@ -569,6 +617,9 @@ class AutoScanWindowsApp(ctk.CTk):
         self.f_year.insert(0, str(veh.get("year", "") or ""))
         self.f_km.insert(0, str(veh.get("km", "") or ""))
         self.f_customer.insert(0, str(veh.get("customer_name", "") or ""))
+        if hasattr(self, "entry_model_filter"):
+            self.entry_model_filter.delete(0, "end")
+            self.f_model.configure(values=list(self.model_options.keys()))
         m_key = veh.get("model_key", "GENERIC_OBD2")
         m_name = VEHICLE_PROFILES_DATABASE.get(m_key, VEHICLE_PROFILES_DATABASE["GENERIC_OBD2"])["name"]
         self.f_model.set(m_name)
@@ -583,6 +634,9 @@ class AutoScanWindowsApp(ctk.CTk):
     def _new_vehicle_form(self):
         for e in (self.f_plate, self.f_year, self.f_km, self.f_customer):
             e.delete(0, "end")
+        if hasattr(self, "entry_model_filter"):
+            self.entry_model_filter.delete(0, "end")
+            self.f_model.configure(values=list(self.model_options.keys()))
         gen = VEHICLE_PROFILES_DATABASE["GENERIC_OBD2"]["name"]
         self.f_model.set(gen)
         self._update_model_preview(gen)
@@ -606,6 +660,167 @@ class AutoScanWindowsApp(ctk.CTk):
                 lbl.configure(text="--")
         tip = spec.get("tips", [""])[0] if spec.get("tips") else ""
         self.lbl_profile_tip.configure(text=f"💡 {tip}" if tip else "")
+
+    def _clear_model_filter(self):
+        self.entry_model_filter.delete(0, "end")
+        all_names = list(self.model_options.keys())
+        self.f_model.configure(values=all_names)
+        if all_names:
+            curr = self.f_model.get()
+            if curr not in all_names:
+                self.f_model.set(all_names[0])
+                self._update_model_preview(all_names[0])
+
+    def _set_brand_filter(self, query):
+        self.entry_model_filter.delete(0, "end")
+        if query:
+            self.entry_model_filter.insert(0, query)
+        self._on_model_filter_type()
+
+    def _on_model_filter_type(self):
+        query = self.entry_model_filter.get().strip().lower()
+        all_specs = load_all_vehicle_profiles()
+        if not query:
+            names = list(self.model_options.keys())
+        else:
+            names = []
+            terms = query.split()
+            for name, key in self.model_options.items():
+                spec = all_specs.get(key, {})
+                search_text = f"{name} {spec.get('category', '')} {key}".lower()
+                if all(t in search_text for t in terms):
+                    names.append(name)
+        if names:
+            self.f_model.configure(values=names)
+            curr = self.f_model.get()
+            if curr not in names:
+                self.f_model.set(names[0])
+                self._update_model_preview(names[0])
+        else:
+            self.f_model.configure(values=["Nenhum modelo encontrado para a busca"])
+
+    def _open_model_catalog_dialog(self):
+        win = ctk.CTkToplevel(self)
+        win.title("Catálogo de Veículos e Motorizações — AutoScan BR")
+        win.geometry("820x600")
+        win.minsize(680, 480)
+        win.transient(self)
+        win.after(100, win.grab_set)
+
+        # Cabeçalho
+        top = ctk.CTkFrame(win, fg_color=PANEL)
+        top.pack(fill="x", padx=16, pady=(16, 8))
+        ctk.CTkLabel(top, text="🚗 Catálogo de Modelos e Calibrações de Fábrica", font=F(16, True)).pack(anchor="w", padx=12, pady=(10, 2))
+        ctk.CTkLabel(top, text="Pesquise por modelo, motor ou combustível e dê 1 clique para carregar suas tolerâncias de fábrica no formulário.",
+                     font=F(11), text_color=MUTED).pack(anchor="w", padx=12, pady=(0, 10))
+
+        # Barra de Pesquisa e Contador
+        s_box = ctk.CTkFrame(win, fg_color="transparent")
+        s_box.pack(fill="x", padx=16, pady=(0, 6))
+        s_box.grid_columnconfigure(0, weight=1)
+
+        entry_search = ctk.CTkEntry(
+            s_box, height=38, font=F(13),
+            placeholder_text="🔍 Digite para pesquisar (ex: Onix, Gol, EA111, Firefly, TSI, Flex, Diesel, BYD, Corolla, Kicks)..."
+        )
+        entry_search.grid(row=0, column=0, sticky="ew", padx=(0, 10))
+
+        lbl_count = ctk.CTkLabel(s_box, text="", font=F(11, True), text_color=AMBER)
+        lbl_count.grid(row=0, column=1)
+
+        # Filtros Rápidos por Marca no Modal
+        b_box = ctk.CTkFrame(win, fg_color="transparent")
+        b_box.pack(fill="x", padx=16, pady=(0, 8))
+        brands = [("Todos", ""), ("Chevrolet", "Chevrolet"), ("Volkswagen", "Volkswagen"),
+                  ("Fiat / Jeep", "Fiat"), ("Ford", "Ford"), ("Hyundai", "Hyundai"),
+                  ("Toyota / Honda", "Toyota"), ("Renault / PSA", "Renault"), ("⚡ Híbridos / EVs", "Elétrico")]
+
+        for b_name, b_q in brands:
+            ctk.CTkButton(
+                b_box, text=b_name, height=24, font=F(10),
+                fg_color="#1e293b", hover_color="#334155",
+                command=lambda qq=b_q: on_brand_click(qq)
+            ).pack(side="left", padx=(0, 4))
+
+        # Lista com Rolagem
+        scroll = ctk.CTkScrollableFrame(win, fg_color=PANEL, corner_radius=10, border_width=1, border_color=BORDER)
+        scroll.pack(fill="both", expand=True, padx=16, pady=(0, 14))
+        scroll.grid_columnconfigure(0, weight=1)
+
+        def populate(q=""):
+            for w in scroll.winfo_children():
+                w.destroy()
+            all_specs = load_all_vehicle_profiles()
+            q_clean = q.strip().lower()
+            filtered = []
+            for k, v in all_specs.items():
+                text = f"{v.get('name', '')} {v.get('category', '')} {k}".lower()
+                if not q_clean or all(term in text for term in q_clean.split()):
+                    filtered.append((k, v))
+
+            lbl_count.configure(text=f"{len(filtered)} de {len(all_specs)} modelo(s)")
+            if not filtered:
+                ctk.CTkLabel(scroll, text="Nenhum modelo encontrado para sua pesquisa.", text_color=MUTED, font=F(13)).pack(pady=40)
+                return
+
+            for idx, (k, spec) in enumerate(filtered):
+                card = ctk.CTkFrame(scroll, fg_color=CARD, corner_radius=8, border_width=1, border_color=BORDER)
+                card.pack(fill="x", pady=4, padx=4)
+                card.grid_columnconfigure(0, weight=1)
+
+                r1 = ctk.CTkFrame(card, fg_color="transparent")
+                r1.pack(fill="x", padx=12, pady=(8, 2))
+                r1.grid_columnconfigure(0, weight=1)
+
+                ctk.CTkLabel(r1, text=spec.get("name", k), font=F(13, True), text_color="#f8fafc", anchor="w").grid(row=0, column=0, sticky="w")
+                ctk.CTkLabel(r1, text=spec.get("category", ""), font=F(10, True), corner_radius=4, fg_color="#1e293b", text_color=ACCENT, padx=6, pady=2).grid(row=0, column=1, sticky="e")
+
+                # Chips de tolerâncias principais
+                tols = spec.get("tolerances", {})
+                chips_txt = []
+                if "idle_rpm" in tols:
+                    chips_txt.append(f"Lenta: {tols['idle_rpm']['min']}–{tols['idle_rpm']['max']} RPM")
+                if "idle_map" in tols:
+                    chips_txt.append(f"MAP: {tols['idle_map']['min']}–{tols['idle_map']['max']} kPa")
+                if "coolant_temp" in tols:
+                    chips_txt.append(f"Temp: {tols['coolant_temp']['min']}–{tols['coolant_temp']['max']} °C")
+                if "fuel_trim_total" in tols:
+                    chips_txt.append(f"Trim: {tols['fuel_trim_total']['min']} a {tols['fuel_trim_total']['max']}%")
+                if "battery_voltage" in tols:
+                    chips_txt.append(f"Alternador: {tols['battery_voltage']['min']}–{tols['battery_voltage']['max']} V")
+
+                r2 = ctk.CTkFrame(card, fg_color="transparent")
+                r2.pack(fill="x", padx=12, pady=(2, 8))
+                ctk.CTkLabel(r2, text="  •  ".join(chips_txt), font=F(11), text_color=MUTED, anchor="w").pack(side="left")
+
+                s_name = spec.get("name", k)
+                btn_select = ctk.CTkButton(
+                    r2, text="✔ Selecionar", width=110, height=26, font=F(11, True),
+                    fg_color="#16a34a", hover_color="#15803d",
+                    command=lambda sn=s_name: select_and_close(sn)
+                )
+                btn_select.pack(side="right")
+
+                # Torna o card inteiro clicável
+                self._bind_click_recursive(card, lambda e, sn=s_name: select_and_close(sn))
+
+        def on_brand_click(brand_query):
+            entry_search.delete(0, "end")
+            if brand_query:
+                entry_search.insert(0, brand_query)
+            populate(brand_query)
+
+        def select_and_close(selected_name):
+            self.entry_model_filter.delete(0, "end")
+            all_names = list(self.model_options.keys())
+            self.f_model.configure(values=all_names)
+            self.f_model.set(selected_name)
+            self._update_model_preview(selected_name)
+            win.destroy()
+
+        entry_search.bind("<KeyRelease>", lambda e: populate(entry_search.get()))
+        populate()
+        entry_search.focus_set()
 
     def _open_ai_profile_generator_dialog(self):
         win = ctk.CTkToplevel(self)
