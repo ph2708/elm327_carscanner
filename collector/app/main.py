@@ -52,8 +52,8 @@ class AutoScanCollector:
         dtc_count = 1
 
         if self.mode == "serial":
-            from .connection.elm_client import RealOBDClient
-            self.real_client = RealOBDClient(port=self.port, baudrate=self.baudrate)
+            from .connection.native_client import NativeELMClient
+            self.real_client = NativeELMClient(port=self.port, baudrate=self.baudrate)
             if not self.real_client.connect():
                 print("[-] Abortando: Não foi possível estabelecer conexão segura com a ECU do veículo.")
                 return False

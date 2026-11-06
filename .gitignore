@@ -22,3 +22,11 @@ venv/
 ENV/
 *.log
 .DS_Store
+
+# PyInstaller & Inno Setup Builds
+build/
+dist/
+installer_output/
+*.pyd
+*.exe
+

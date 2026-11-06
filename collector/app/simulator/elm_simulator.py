@@ -28,6 +28,7 @@ class ELM327Simulator:
             "stft_b1": 1.2,        # %
             "ltft_b1": 4.5,        # %
             "o2_b1s1": 0.45,       # Volts (0.1 a 0.9V)
+            "battery_voltage": 14.1, # Volts (Alternador carregando)
             "throttle_moving": True,
             "dtcs": ["P0171"]      # Simula falha de mistura pobre
         }
@@ -57,6 +58,17 @@ class ELM327Simulator:
         
         # Sonda Lambda ciclando entre pobre e rica (0.1V a 0.85V)
         self.state["o2_b1s1"] = 0.48 + 0.38 * math.sin(elapsed * 3.0)
+
+        # Parâmetros secundários (carga, avanço, módulo, sonda pós-catalisador, MAF)
+        load_factor = max(0.0, cycle)
+        self.state["engine_load"] = round(22.0 + load_factor * 45.0 + random.uniform(-1.5, 1.5), 1)
+        self.state["timing_advance"] = round(12.0 + load_factor * 18.0 + random.uniform(-1.0, 1.0), 1)
+        self.state["battery_voltage"] = round(14.1 + random.uniform(-0.08, 0.08), 2)
+        self.state["ecu_voltage"] = round(self.state["battery_voltage"] - 0.25, 2)
+        self.state["o2_b1s2"] = round(0.66 + random.uniform(-0.03, 0.03), 3)
+        self.state["maf_gs"] = round(3.1 + load_factor * 16.0, 2)
+        self.state["fuel_level"] = 62.0
+        self.state["baro_kpa"] = 95.0
 
     def process_command(self, cmd_raw: str) -> str:
         """Processa comando AT ou comando hexadecimal OBD"""
