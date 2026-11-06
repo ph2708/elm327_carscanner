@@ -121,7 +121,20 @@ class AutoScanWindowsApp(ctk.CTk):
         self.simulator = None
         self.is_connected = False
         self.is_running = False
-        self.discovered_devices = {}
+        self.connection_aborted = False
+        self.connecting_client = None
+
+        # Pré-inicializa dispositivos para disponibilidade imediata (sem esperar scan)
+        self.discovered_devices = {
+            f"⭐ [OBD] OBDII ({DEFAULT_MAC})": {"type": "BT", "address": DEFAULT_MAC, "name": "OBDII"}
+        }
+        try:
+            for p in serial.tools.list_ports.comports():
+                label = f"🔌 [COM] {p.device} - {p.description}"
+                self.discovered_devices[label] = {"type": "COM", "address": p.device, "name": p.description}
+        except Exception:
+            pass
+
         self.latest_telemetry = {}
         self.session_frames = deque(maxlen=3000)
         self.minmax = {}
@@ -260,10 +273,13 @@ class AutoScanWindowsApp(ctk.CTk):
     def _build_topbar(self, parent):
         bar = ctk.CTkFrame(parent, fg_color=PANEL, corner_radius=10, border_width=1, border_color=BORDER)
         bar.grid(row=0, column=0, sticky="ew", padx=12, pady=12)
-        bar.grid_columnconfigure(4, weight=1)
+        bar.grid_columnconfigure(5, weight=1)
 
-        self.combo_devices = ctk.CTkComboBox(bar, values=["Procurando adaptadores..."], width=240, height=32, font=F(12))
+        init_values = list(self.discovered_devices.keys())
+        self.combo_devices = ctk.CTkComboBox(bar, values=init_values, width=250, height=32, font=F(12))
         self.combo_devices.grid(row=0, column=0, padx=(10, 4), pady=10)
+        if init_values:
+            self.combo_devices.set(init_values[0])
 
         self.btn_scan = ctk.CTkButton(bar, text="🔍", width=34, height=32, fg_color="#334155", hover_color="#475569",
                                       command=self._start_device_discovery)
@@ -273,29 +289,34 @@ class AutoScanWindowsApp(ctk.CTk):
                                          fg_color="#2563eb", hover_color="#1d4ed8", command=self._toggle_connection)
         self.btn_connect.grid(row=0, column=2, padx=(6, 2))
 
+        self.btn_cancel_connect = ctk.CTkButton(bar, text="✖ Abortar", width=95, height=32, font=F(12, True),
+                                               fg_color="#dc2626", hover_color="#b91c1c", state="disabled",
+                                               command=self._cancel_connection)
+        self.btn_cancel_connect.grid(row=0, column=3, padx=2)
+
         self.btn_sim = ctk.CTkButton(bar, text="🎮 Simulador", width=105, height=32, font=F(12),
                                      fg_color="#0f766e", hover_color="#115e59", command=self._toggle_simulator)
-        self.btn_sim.grid(row=0, column=3, padx=2)
+        self.btn_sim.grid(row=0, column=4, padx=2)
 
         st = ctk.CTkFrame(bar, fg_color="transparent")
-        st.grid(row=0, column=4, sticky="w", padx=12)
+        st.grid(row=0, column=5, sticky="w", padx=12)
         self.lbl_status = ctk.CTkLabel(st, text="● Desconectado", font=F(12, True), text_color=RED)
         self.lbl_status.grid(row=0, column=0, sticky="w")
         self.lbl_protocol = ctk.CTkLabel(st, text="Protocolo: --", font=F(10), text_color=MUTED)
         self.lbl_protocol.grid(row=1, column=0, sticky="w")
 
         self.lbl_record_status = ctk.CTkLabel(bar, text="", font=F(11), text_color=MUTED)
-        self.lbl_record_status.grid(row=0, column=5, padx=6)
+        self.lbl_record_status.grid(row=0, column=6, padx=6)
 
         self.btn_record = ctk.CTkButton(bar, text="▶ Test-Drive", width=115, height=32, font=F(12, True),
                                         fg_color="#16a34a", hover_color="#15803d", state="disabled",
                                         command=self._toggle_test_drive)
-        self.btn_record.grid(row=0, column=6, padx=2)
+        self.btn_record.grid(row=0, column=7, padx=2)
 
         self.btn_read_dtc = ctk.CTkButton(bar, text="⚠️ Falhas", width=90, height=32, font=F(12),
                                           fg_color="#d97706", hover_color="#b45309", state="disabled",
                                           command=self._read_dtcs_dialog)
-        self.btn_read_dtc.grid(row=0, column=7, padx=(2, 10))
+        self.btn_read_dtc.grid(row=0, column=8, padx=(2, 10))
 
     def _show_page(self, key):
         self.current_page = key
@@ -1541,12 +1562,15 @@ class AutoScanWindowsApp(ctk.CTk):
         if not any(v["address"] == DEFAULT_MAC for v in devices.values()):
             devices[f"⭐ [OBD] OBDII ({DEFAULT_MAC})"] = {"type": "BT", "address": DEFAULT_MAC, "name": "OBDII"}
 
-        self.discovered_devices = devices
-        labels = sorted(devices.keys(), key=lambda k: (not k.startswith("⭐"), k))
+        self.discovered_devices.update(devices)
+        labels = sorted(self.discovered_devices.keys(), key=lambda k: (not k.startswith("⭐"), k))
 
         def update():
+            curr = self.combo_devices.get()
             self.combo_devices.configure(values=labels)
-            if labels:
+            if curr in labels:
+                self.combo_devices.set(curr)
+            elif labels:
                 self.combo_devices.set(labels[0])
             self.btn_scan.configure(state="normal", text="🔍")
         self.after(0, update)
@@ -1568,22 +1592,43 @@ class AutoScanWindowsApp(ctk.CTk):
         self.session_frames.clear()
         self.minmax.clear()
 
+    def _cancel_connection(self):
+        self.connection_aborted = True
+        if self.connecting_client:
+            try:
+                self.connecting_client.close()
+            except Exception:
+                pass
+            self.connecting_client = None
+        self.btn_connect.configure(state="normal", text="⚡ Conectar", fg_color="#2563eb", hover_color="#1d4ed8")
+        self.btn_cancel_connect.configure(state="disabled")
+        self.btn_sim.configure(state="normal")
+        self.lbl_status.configure(text="● Conexão abortada", text_color=MUTED)
+
     def _connect(self):
         dev = self.discovered_devices.get(self.combo_devices.get())
         if not dev:
             msgbox.showwarning("Aviso", "Selecione um adaptador válido na lista.")
             return
-        self.btn_connect.configure(state="disabled", text="⏳ Conectando")
+        self.connection_aborted = False
+        self.btn_connect.configure(state="disabled", text="⏳ Conectando...")
+        self.btn_cancel_connect.configure(state="normal")
         self.btn_sim.configure(state="disabled")
-        self.lbl_status.configure(text="● Conectando...", text_color=AMBER)
+        self.lbl_status.configure(text="● Conectando ao OBD...", text_color=AMBER)
 
         def worker():
             mac = dev["address"] if dev["type"] == "BT" else None
             port = dev["address"] if dev["type"] == "COM" else None
             client = NativeELMClient(port=port, bt_mac=mac)
+            self.connecting_client = client
             ok = client.connect()
 
             def done():
+                self.connecting_client = None
+                self.btn_cancel_connect.configure(state="disabled")
+                if getattr(self, "connection_aborted", False):
+                    client.close()
+                    return
                 if ok:
                     self.client = client
                     self._set_connected_ui("● Conectado (ECU online)", GREEN, client.protocol_name)
@@ -1591,7 +1636,7 @@ class AutoScanWindowsApp(ctk.CTk):
                     threading.Thread(target=self._telemetry_worker, daemon=True).start()
                 else:
                     client.close()
-                    self.btn_connect.configure(state="normal", text="⚡ Conectar")
+                    self.btn_connect.configure(state="normal", text="⚡ Conectar", fg_color="#2563eb", hover_color="#1d4ed8")
                     self.btn_sim.configure(state="normal")
                     self.lbl_status.configure(text="● Falha na conexão", text_color=RED)
                     msgbox.showerror("Erro de conexão",

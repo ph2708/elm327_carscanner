@@ -102,12 +102,15 @@ class NativeELMClient:
         self.send_cmd("ATSP0", timeout=2.0) # Protocol auto
 
         # Testa comunicacao com a ECU
-        resp = self.send_cmd("0100", timeout=3.0, delay=0.5)
+        resp = self.send_cmd("0100", timeout=5.0, delay=0.5)
         print(f"[*] Resposta ECU (0100): {resp}")
 
-        if "41 00" in resp or "4100" in resp:
+        if "41 00" in resp or "4100" in resp or "41" in resp:
             desc_proto = self.send_cmd("ATDP", timeout=1.0)
-            self.protocol_name = desc_proto.replace(">", "").strip() or "ISO 15765-4 (CAN 11/500)"
+            clean_proto = desc_proto.replace(">", "").replace("AUTO,", "").strip()
+            if not clean_proto or len(clean_proto) < 3:
+                clean_proto = "ISO 15765-4 (CAN 11/500)"
+            self.protocol_name = clean_proto
             print(f"[✓] ECU Conectada com sucesso!")
             print(f"    Protocolo: {self.protocol_name}")
             return True
@@ -118,8 +121,9 @@ class NativeELMClient:
         else:
             # Caso a ECU demore mais para sincronizar CAN, tenta mais uma vez
             time.sleep(0.5)
-            resp2 = self.send_cmd("0100", timeout=3.0)
+            resp2 = self.send_cmd("0100", timeout=5.0)
             if "41" in resp2:
+                self.protocol_name = "ISO 15765-4 (CAN 11/500)"
                 print("[✓] ECU Conectada na segunda tentativa!")
                 return True
             print(f"[!] Resposta inesperada do ELM327: {resp}")
@@ -352,9 +356,11 @@ class NativeELMClient:
                 self.sock.close()
             except Exception:
                 pass
+            self.sock = None
         if self.serial_conn:
             try:
                 self.serial_conn.close()
             except Exception:
                 pass
+            self.serial_conn = None
 
