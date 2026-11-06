@@ -897,50 +897,80 @@ class AutoScanWindowsApp(ctk.CTk):
         tols = spec.get("tolerances", {})
 
         win = ctk.CTkToplevel(self)
-        win.title(f"Ajustar Tolerâncias — {curr_name[:30]}")
-        win.geometry("560x540")
-        win.resizable(False, False)
+        win.title(f"Ajustar Tolerâncias — {curr_name[:35]}")
+        win.geometry("680x640")
+        win.minsize(600, 500)
         win.transient(self)
         win.after(100, win.grab_set)
 
-        ctk.CTkLabel(win, text="✏️ Ajustar Tolerâncias de Fábrica da Oficina", font=F(15, True)).pack(pady=(14, 2))
-        ctk.CTkLabel(win, text=f"Perfil: {curr_name}\nAltere os valores nominais de alerta conforme a calibração desejada.",
+        ctk.CTkLabel(win, text="✏️ Calibração de Fábrica e Tolerâncias da Oficina", font=F(16, True)).pack(pady=(14, 2))
+        ctk.CTkLabel(win, text=f"Perfil: {curr_name}\nDefina as faixas de alerta para todos os parâmetros. Campos em branco são considerados opcionais.",
                      font=F(11), text_color=MUTED, justify="center").pack(pady=(0, 10))
 
-        scroll = ctk.CTkScrollableFrame(win, height=320, fg_color=PANEL, corner_radius=10, border_width=1, border_color=BORDER)
+        scroll = ctk.CTkScrollableFrame(win, fg_color=PANEL, corner_radius=10, border_width=1, border_color=BORDER)
         scroll.pack(fill="both", expand=True, padx=20, pady=5)
         scroll.grid_columnconfigure(0, weight=2)
         scroll.grid_columnconfigure((1, 2), weight=1)
+        scroll.grid_columnconfigure(3, weight=0, minsize=45)
 
-        ctk.CTkLabel(scroll, text="Parâmetro", font=F(11, True), text_color=MUTED).grid(row=0, column=0, sticky="w", padx=6, pady=4)
+        ctk.CTkLabel(scroll, text="Parâmetro", font=F(11, True), text_color=MUTED).grid(row=0, column=0, sticky="w", padx=8, pady=4)
         ctk.CTkLabel(scroll, text="Mínimo", font=F(11, True), text_color=MUTED).grid(row=0, column=1, padx=6, pady=4)
         ctk.CTkLabel(scroll, text="Máximo", font=F(11, True), text_color=MUTED).grid(row=0, column=2, padx=6, pady=4)
+        ctk.CTkLabel(scroll, text="Un.", font=F(11, True), text_color=MUTED).grid(row=0, column=3, padx=4, pady=4)
+
+        categories = [
+            ("⚙️ MOTOR & ADMISSÃO", [
+                ("idle_rpm", "Marcha Lenta Operacional", "RPM"),
+                ("idle_map", "Vácuo no Coletor em Lenta (MAP)", "kPa"),
+                ("idle_tps", "Abertura Borboleta em Lenta (TPS)", "%"),
+                ("engine_load", "Carga do Motor em Lenta", "%"),
+                ("timing_advance", "Avanço de Ignição em Lenta", "°"),
+                ("maf_gs", "Fluxo de Massa de Ar (MAF)", "g/s"),
+            ]),
+            ("🌡️ ARREFECIMENTO & LUBRIFICAÇÃO", [
+                ("coolant_temp", "Temperatura Água Arrefecimento", "°C"),
+                ("oil_temp", "Temperatura do Óleo do Motor", "°C"),
+                ("intake_temp", "Temperatura do Ar de Admissão (IAT)", "°C"),
+            ]),
+            ("⛽ COMBUSTÍVEL, INJEÇÃO & MISTURA", [
+                ("fuel_trim_total", "Ajuste de Combustível Total (Trim)", "%"),
+                ("lambda_o2", "Tensão da Sonda Lambda Pré (O2)", "V"),
+                ("fuel_rail_bar", "Pressão do Rail / Flauta (GDI/Diesel)", "bar"),
+                ("fuel_pressure_kpa", "Pressão Linha de Baixa", "kPa"),
+                ("fuel_rate_lh", "Consumo em Marcha Lenta", "L/h"),
+                ("ethanol_pct", "Porcentagem de Etanol Esperada (Flex)", "%"),
+            ]),
+            ("⚡ ELÉTRICA & TENSÕES", [
+                ("battery_voltage", "Tensão com Alternador Carregando", "V"),
+                ("ecu_voltage", "Tensão de Alimentação da ECU", "V"),
+            ]),
+        ]
 
         edit_entries = {}
         row = 1
-        fields_to_edit = [
-            ("idle_rpm", "Marcha Lenta (RPM)"),
-            ("idle_map", "Vácuo MAP Lenta (kPa)"),
-            ("coolant_temp", "Temperatura Água (°C)"),
-            ("idle_tps", "Abertura Borboleta TPS (%)"),
-            ("fuel_trim_total", "Trim Combustível Total (±%)"),
-            ("battery_voltage", "Tensão Alternador Carga (V)"),
-        ]
-
-        for k, lbl in fields_to_edit:
-            t = tols.get(k, {"min": 0, "max": 0})
-            ctk.CTkLabel(scroll, text=lbl, font=F(12), anchor="w").grid(row=row, column=0, sticky="w", padx=6, pady=6)
-
-            e_min = ctk.CTkEntry(scroll, width=80, height=30)
-            e_min.insert(0, str(t.get("min", "")))
-            e_min.grid(row=row, column=1, padx=6, pady=6)
-
-            e_max = ctk.CTkEntry(scroll, width=80, height=30)
-            e_max.insert(0, str(t.get("max", "")))
-            e_max.grid(row=row, column=2, padx=6, pady=6)
-
-            edit_entries[k] = (e_min, e_max)
+        for cat_title, fields in categories:
+            ctk.CTkLabel(scroll, text=cat_title, font=F(11, True), text_color=AMBER, anchor="w").grid(
+                row=row, column=0, columnspan=4, sticky="ew", padx=8, pady=(12, 4))
             row += 1
+
+            for k, lbl, unit in fields:
+                t = tols.get(k, {})
+                ctk.CTkLabel(scroll, text=lbl, font=F(12), anchor="w").grid(row=row, column=0, sticky="w", padx=8, pady=4)
+
+                e_min = ctk.CTkEntry(scroll, width=80, height=28, placeholder_text="Opcional")
+                if "min" in t:
+                    e_min.insert(0, str(t["min"]))
+                e_min.grid(row=row, column=1, padx=6, pady=4)
+
+                e_max = ctk.CTkEntry(scroll, width=80, height=28, placeholder_text="Opcional")
+                if "max" in t:
+                    e_max.insert(0, str(t["max"]))
+                e_max.grid(row=row, column=2, padx=6, pady=4)
+
+                ctk.CTkLabel(scroll, text=unit, font=F(11), text_color=MUTED).grid(row=row, column=3, padx=4, pady=4)
+
+                edit_entries[k] = (e_min, e_max, lbl, unit)
+                row += 1
 
         bottom = ctk.CTkFrame(win, fg_color="transparent")
         bottom.pack(fill="x", padx=20, pady=12)
@@ -950,22 +980,30 @@ class AutoScanWindowsApp(ctk.CTk):
             try:
                 new_spec = dict(spec)
                 new_tols = dict(new_spec.get("tolerances", {}))
-                for k, (e_min, e_max) in edit_entries.items():
-                    val_min = float(e_min.get().strip().replace(",", "."))
-                    val_max = float(e_max.get().strip().replace(",", "."))
-                    if k not in new_tols:
-                        new_tols[k] = {"desc": k, "unit": ""}
-                    new_tols[k]["min"] = val_min
-                    new_tols[k]["max"] = val_max
-                new_spec["tolerances"] = new_tols
+                for k, (e_min, e_max, lbl, unit) in edit_entries.items():
+                    v_min_raw = e_min.get().strip().replace(",", ".")
+                    v_max_raw = e_max.get().strip().replace(",", ".")
+                    if v_min_raw and v_max_raw:
+                        val_min = float(v_min_raw)
+                        val_max = float(v_max_raw)
+                        if k not in new_tols:
+                            new_tols[k] = {"desc": lbl, "unit": unit}
+                        new_tols[k]["min"] = val_min
+                        new_tols[k]["max"] = val_max
+                        new_tols[k]["unit"] = unit
+                        new_tols[k]["desc"] = lbl
+                    elif not v_min_raw and not v_max_raw and k in new_tols:
+                        # Se o usuário limpou um parâmetro opcional, remove da checagem
+                        del new_tols[k]
 
+                new_spec["tolerances"] = new_tols
                 save_custom_profile(key, new_spec)
                 self._load_tolerances()
                 self._update_model_preview(curr_name)
                 win.destroy()
-                msgbox.showinfo("Sucesso", f"Calibrações do perfil '{curr_name}' salvas com sucesso!")
+                msgbox.showinfo("Sucesso", f"Calibrações de '{curr_name}' salvas com sucesso!")
             except ValueError:
-                msgbox.showwarning("Aviso", "Por favor, digite números válidos em todos os campos.")
+                msgbox.showwarning("Aviso", "Por favor, preencha números válidos nos campos que desejar calibrar.")
 
         def restore_defaults():
             if msgbox.askyesno("Restaurar", f"Deseja restaurar as tolerâncias originais de fábrica para '{curr_name}'?"):
@@ -1087,21 +1125,29 @@ class AutoScanWindowsApp(ctk.CTk):
         if key == "rpm":
             return t("idle_rpm", 700, 900) if idle else None
         if key == "engine_load":
-            return (15, 40) if idle else None
+            return t("engine_load", 15, 40) if idle else None
         if key == "map_kpa":
             return t("idle_map", 27, 42) if idle else None
         if key == "maf_gs":
-            return (1.5, 6.0) if idle else None
+            return t("maf_gs", 1.5, 6.0) if idle else None
         if key == "timing_advance":
-            return (4, 22) if idle else None
+            return t("timing_advance", 4, 22) if idle else None
         if key == "coolant_temp":
             return t("coolant_temp", 82, 103) if running else None
+        if key == "oil_temp":
+            return t("oil_temp", 80, 115) if running else None
         if key == "intake_temp":
-            return (-10, 70)
+            return t("intake_temp", -10, 70)
         if key == "ambient_temp":
             return (-10, 50)
-        if key == "oil_temp":
-            return (80, 115) if running else None
+        if key == "fuel_rail_bar":
+            return (tol["fuel_rail_bar"]["min"], tol["fuel_rail_bar"]["max"]) if "fuel_rail_bar" in tol and running else None
+        if key == "fuel_pressure_kpa":
+            return (tol["fuel_pressure_kpa"]["min"], tol["fuel_pressure_kpa"]["max"]) if "fuel_pressure_kpa" in tol and running else None
+        if key == "fuel_rate_lh":
+            return (tol["fuel_rate_lh"]["min"], tol["fuel_rate_lh"]["max"]) if "fuel_rate_lh" in tol and idle else None
+        if key == "ethanol_pct":
+            return (tol["ethanol_pct"]["min"], tol["ethanol_pct"]["max"]) if "ethanol_pct" in tol else None
         if key == "fuel_level":
             return (15, 100)
         if key == "distance_mil_km":
