@@ -1925,6 +1925,9 @@ class AutoScanWindowsApp(ctk.CTk):
     # ==========================================================
     def _ingest_frame(self, raw):
         frame = {k: v for k, v in raw.items() if isinstance(v, (int, float)) and not isinstance(v, bool)}
+        # Se o MAP estiver em repouso atmosférico (>= 88 kPa) e RPM for resíduo de partida (<350 RPM), motor está parado
+        if frame.get("map_kpa", 0) >= 88 and frame.get("speed", 0) == 0 and frame.get("rpm", 0) < 350:
+            frame["rpm"] = 0.0
         if "stft_b1" in frame and "ltft_b1" in frame:
             frame["trim_total"] = round(frame["stft_b1"] + frame["ltft_b1"], 1)
         frame["t"] = time.time()
