@@ -1541,10 +1541,11 @@ class AutoScanWindowsApp(ctk.CTk):
         self.seg_chart.set("Ao vivo (60 s)")
         self.seg_chart.pack(side="left")
 
+        self.chart_preset_mode = "Multicanal"
         self.seg_chart_preset = ctk.CTkSegmentedButton(
-            bar, values=["🎛️ Multicanal", "⚡ Elétrica", "🔥 Injeção & Sonda", "🌡️ Térmica"],
-            command=lambda v: self._redraw_charts_now())
-        self.seg_chart_preset.set("🎛️ Multicanal")
+            bar, values=["Multicanal", "Elétrica", "Injeção & Sonda", "Térmica"],
+            command=self._on_preset_mode)
+        self.seg_chart_preset.set("Multicanal")
         self.seg_chart_preset.pack(side="left", padx=10)
 
         self.btn_chart_freeze = ctk.CTkButton(
@@ -1561,6 +1562,10 @@ class AutoScanWindowsApp(ctk.CTk):
         self.canvas = FigureCanvasTkAgg(self.fig, master=holder)
         self.canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
         self._draw_charts([], "Aguardando dados...")
+
+    def _on_preset_mode(self, value):
+        self.chart_preset_mode = value
+        self._redraw_charts_now()
 
     def _toggle_chart_freeze(self):
         self.chart_frozen = not getattr(self, "chart_frozen", False)
@@ -1590,239 +1595,244 @@ class AutoScanWindowsApp(ctk.CTk):
             self.after(1000, self._live_chart_tick)
 
     def _draw_charts(self, frames, title):
-        fig = self.fig
-        fig.clf()
-        axes = fig.subplots(3, 1, sharex=True)
-        preset = getattr(self, "seg_chart_preset", None)
-        preset_mode = preset.get() if preset else "🎛️ Multicanal"
+        if getattr(self, "_chart_rendering", False):
+            return
+        self._chart_rendering = True
+        try:
+            fig = self.fig
+            fig.clf()
+            axes = fig.subplots(3, 1, sharex=True)
+            mode = getattr(self, "chart_preset_mode", "Multicanal")
 
-        for ax in axes:
-            ax.set_facecolor("#090d16")
-            ax.grid(True, color="#1e293b", linestyle="-", linewidth=0.7, alpha=0.6)
-            ax.tick_params(colors="#94a3b8", labelsize=8)
-            for s in ax.spines.values():
-                s.set_color("#1e293b")
-        fig.suptitle(f"{title} — {self.active_plate} [{preset_mode}]", color="#e2e8f0", fontsize=10, weight="bold")
+            for ax in axes:
+                ax.set_facecolor("#090d16")
+                ax.grid(True, color="#1e293b", linestyle="-", linewidth=0.7, alpha=0.6)
+                ax.tick_params(colors="#94a3b8", labelsize=8)
+                for s in ax.spines.values():
+                    s.set_color("#1e293b")
+            fig.suptitle(f"{title} — {self.active_plate} [{mode}]", color="#e2e8f0", fontsize=10, weight="bold")
 
-        if frames:
-            t0 = frames[0].get("t", 0)
-            ts = [fr.get("t", t0 + i * 0.2) - t0 for i, fr in enumerate(frames)]
-            latest = frames[-1]
+            if frames:
+                t0 = frames[0].get("t", 0)
+                ts = [fr.get("t", t0 + i * 0.2) - t0 for i, fr in enumerate(frames)]
+                latest = frames[-1]
 
-            def series(k):
-                raw = [fr.get(k, float("nan")) for fr in frames]
-                clean = [v for v in raw if v is not None and not math.isnan(v)]
-                return raw, clean
+                def series(k):
+                    raw = [fr.get(k, float("nan")) for fr in frames]
+                    clean = [v for v in raw if v is not None and not math.isnan(v)]
+                    return raw, clean
 
-            if preset_mode == "⚡ Elétrica":
-                # Subplot 1: Bateria pino 16
-                raw_bat, cln_bat = series("battery_voltage")
-                cur_bat = latest.get("battery_voltage", 0.0)
-                ax = axes[0]
-                ax.plot(ts, raw_bat, color="#facc15", lw=1.8, label="Bateria")
-                ax.axhspan(13.5, 14.8, color="#22c55e", alpha=0.12)
-                ax.axhspan(11.8, 12.8, color="#38bdf8", alpha=0.08)
-                ax.set_ylim(10.0, 16.0)
-                ax.set_ylabel("Bateria V", color="#facc15", fontsize=8)
-                ax.set_title(f"● Tensão Bateria / Alternador: {cur_bat:.1f} V   (Faixa Carga: 13.5V – 14.8V)",
-                             color="#e2e8f0", fontsize=9, loc="left", pad=4)
+                if "Elétrica" in mode:
+                    # Subplot 1: Bateria pino 16
+                    raw_bat, cln_bat = series("battery_voltage")
+                    cur_bat = latest.get("battery_voltage", 0.0)
+                    ax = axes[0]
+                    ax.plot(ts, raw_bat, color="#facc15", lw=1.8, label="Bateria")
+                    ax.axhspan(13.5, 14.8, color="#22c55e", alpha=0.12)
+                    ax.axhspan(11.8, 12.8, color="#38bdf8", alpha=0.08)
+                    ax.set_ylim(10.0, 16.0)
+                    ax.set_ylabel("Bateria V", color="#facc15", fontsize=8)
+                    ax.set_title(f"● Tensão Bateria / Alternador: {cur_bat:.1f} V   (Faixa Carga: 13.5V – 14.8V)",
+                                 color="#e2e8f0", fontsize=9, loc="left", pad=4)
 
-                # Subplot 2: Tensão ECU vs Bateria (queda de chicote)
-                raw_ecu, cln_ecu = series("ecu_voltage")
-                cur_ecu = latest.get("ecu_voltage", 0.0)
-                drop = abs(cur_bat - cur_ecu) if (cur_bat and cur_ecu) else 0.0
-                ax = axes[1]
-                ax.plot(ts, raw_ecu, color="#38bdf8", lw=1.8, label="ECU")
-                ax.plot(ts, raw_bat, color="#facc15", lw=1.0, ls="--", alpha=0.6, label="Bateria Ref.")
-                ax.set_ylim(10.0, 16.0)
-                ax.set_ylabel("ECU V", color="#38bdf8", fontsize=8)
-                ax.set_title(f"● Alimentação ECU: {cur_ecu:.2f} V   |   Queda Linha/Chicote: {drop:.2f} V",
-                             color="#e2e8f0", fontsize=9, loc="left", pad=4)
+                    # Subplot 2: Tensão ECU vs Bateria (queda de chicote)
+                    raw_ecu, cln_ecu = series("ecu_voltage")
+                    cur_ecu = latest.get("ecu_voltage", 0.0)
+                    drop = abs(cur_bat - cur_ecu) if (cur_bat and cur_ecu) else 0.0
+                    ax = axes[1]
+                    ax.plot(ts, raw_ecu, color="#38bdf8", lw=1.8, label="ECU")
+                    ax.plot(ts, raw_bat, color="#facc15", lw=1.0, ls="--", alpha=0.6, label="Bateria Ref.")
+                    ax.set_ylim(10.0, 16.0)
+                    ax.set_ylabel("ECU V", color="#38bdf8", fontsize=8)
+                    ax.set_title(f"● Alimentação ECU: {cur_ecu:.2f} V   |   Queda Linha/Chicote: {drop:.2f} V",
+                                 color="#e2e8f0", fontsize=9, loc="left", pad=4)
 
-                # Subplot 3: Avanço de Ignição & RPM
-                raw_ign, _ = series("timing_advance")
-                raw_rpm, cln_rpm = series("rpm")
-                cur_ign = latest.get("timing_advance", 0.0)
-                cur_rpm = latest.get("rpm", 0.0)
-                ax = axes[2]
-                ax.plot(ts, raw_ign, color="#a78bfa", lw=1.6)
-                ax.set_ylabel("Avanço °", color="#a78bfa", fontsize=8)
-                ax.set_ylim(-10, 45)
-                tw = ax.twinx()
-                tw.plot(ts, raw_rpm, color="#38bdf8", lw=1.2, ls=":")
-                tw.set_ylabel("RPM", color="#38bdf8", fontsize=8)
-                max_rpm = max(cln_rpm) if cln_rpm else 1200
-                tw.set_ylim(bottom=0, top=max(1200, max_rpm * 1.15))
-                tw.tick_params(colors="#94a3b8", labelsize=8)
-                ax.set_title(f"● Avanço Ignição: {cur_ign:.1f}°   |   ● Rotação: {cur_rpm:.0f} RPM",
-                             color="#e2e8f0", fontsize=9, loc="left", pad=4)
-                ax.set_xlabel("segundos decorridos", color="#94a3b8", fontsize=8)
+                    # Subplot 3: Avanço de Ignição & RPM
+                    raw_ign, _ = series("timing_advance")
+                    raw_rpm, cln_rpm = series("rpm")
+                    cur_ign = latest.get("timing_advance", 0.0)
+                    cur_rpm = latest.get("rpm", 0.0)
+                    ax = axes[2]
+                    ax.plot(ts, raw_ign, color="#a78bfa", lw=1.6)
+                    ax.set_ylabel("Avanço °", color="#a78bfa", fontsize=8)
+                    ax.set_ylim(-10, 45)
+                    tw = ax.twinx()
+                    tw.plot(ts, raw_rpm, color="#38bdf8", lw=1.2, ls=":")
+                    tw.set_ylabel("RPM", color="#38bdf8", fontsize=8)
+                    max_rpm = max(cln_rpm) if cln_rpm else 1200
+                    tw.set_ylim(bottom=0, top=max(1200, max_rpm * 1.15))
+                    tw.tick_params(colors="#94a3b8", labelsize=8)
+                    ax.set_title(f"● Avanço Ignição: {cur_ign:.1f}°   |   ● Rotação: {cur_rpm:.0f} RPM",
+                                 color="#e2e8f0", fontsize=9, loc="left", pad=4)
+                    ax.set_xlabel("segundos decorridos", color="#94a3b8", fontsize=8)
 
-            elif preset_mode == "🔥 Injeção & Sonda":
-                # Subplot 1: Sonda Lambda B1S1 e B1S2
-                raw_o1, _ = series("o2_b1s1")
-                raw_o2, _ = series("o2_b1s2")
-                cur_o1 = latest.get("o2_b1s1", 0.0)
-                cur_o2 = latest.get("o2_b1s2", 0.0)
-                ax = axes[0]
-                ax.plot(ts, raw_o1, color="#2dd4bf", lw=1.8, label="Pré B1S1")
-                ax.plot(ts, raw_o2, color="#a78bfa", lw=1.2, ls="--", label="Pós B1S2")
-                ax.axhline(0.1, color="gray40", ls=":", lw=0.8)
-                ax.axhline(0.9, color="gray40", ls=":", lw=0.8)
-                ax.set_ylim(0.0, 1.05)
-                ax.set_ylabel("Sonda V", color="#2dd4bf", fontsize=8)
-                ax.set_title(f"● Sonda Pré B1S1: {cur_o1:.2f} V   |   ● Sonda Pós B1S2: {cur_o2:.2f} V",
-                             color="#e2e8f0", fontsize=9, loc="left", pad=4)
+                elif "Injeção" in mode or "Sonda" in mode:
+                    # Subplot 1: Sonda Lambda B1S1 e B1S2
+                    raw_o1, _ = series("o2_b1s1")
+                    raw_o2, _ = series("o2_b1s2")
+                    cur_o1 = latest.get("o2_b1s1", 0.0)
+                    cur_o2 = latest.get("o2_b1s2", 0.0)
+                    ax = axes[0]
+                    ax.plot(ts, raw_o1, color="#2dd4bf", lw=1.8, label="Pré B1S1")
+                    ax.plot(ts, raw_o2, color="#a78bfa", lw=1.2, ls="--", label="Pós B1S2")
+                    ax.axhline(0.1, color="gray40", ls=":", lw=0.8)
+                    ax.axhline(0.9, color="gray40", ls=":", lw=0.8)
+                    ax.set_ylim(0.0, 1.05)
+                    ax.set_ylabel("Sonda V", color="#2dd4bf", fontsize=8)
+                    ax.set_title(f"● Sonda Pré B1S1: {cur_o1:.2f} V   |   ● Sonda Pós B1S2: {cur_o2:.2f} V",
+                                 color="#e2e8f0", fontsize=9, loc="left", pad=4)
 
-                # Subplot 2: STFT & LTFT
-                raw_s, _ = series("stft_b1")
-                raw_l, _ = series("ltft_b1")
-                cur_s = latest.get("stft_b1", 0.0)
-                cur_l = latest.get("ltft_b1", 0.0)
-                ax = axes[1]
-                ax.plot(ts, raw_s, color="#38bdf8", lw=1.6, label="STFT B1")
-                ax.plot(ts, raw_l, color="#f87171", lw=1.6, label="LTFT B1")
-                ax.axhline(0, color="gray40", lw=0.8)
-                ax.axhline(10, color=RED, ls="--", alpha=0.5)
-                ax.axhline(-10, color=RED, ls="--", alpha=0.5)
-                ax.set_ylim(-25.0, 25.0)
-                ax.set_ylabel("Ajuste %", color="#38bdf8", fontsize=8)
-                ax.set_title(f"● Curto Prazo (STFT): {cur_s:+.1f}%   |   ● Longo Prazo (LTFT): {cur_l:+.1f}%",
-                             color="#e2e8f0", fontsize=9, loc="left", pad=4)
+                    # Subplot 2: STFT & LTFT
+                    raw_s, _ = series("stft_b1")
+                    raw_l, _ = series("ltft_b1")
+                    cur_s = latest.get("stft_b1", 0.0)
+                    cur_l = latest.get("ltft_b1", 0.0)
+                    ax = axes[1]
+                    ax.plot(ts, raw_s, color="#38bdf8", lw=1.6, label="STFT B1")
+                    ax.plot(ts, raw_l, color="#f87171", lw=1.6, label="LTFT B1")
+                    ax.axhline(0, color="gray40", lw=0.8)
+                    ax.axhline(10, color=RED, ls="--", alpha=0.5)
+                    ax.axhline(-10, color=RED, ls="--", alpha=0.5)
+                    ax.set_ylim(-25.0, 25.0)
+                    ax.set_ylabel("Ajuste %", color="#38bdf8", fontsize=8)
+                    ax.set_title(f"● Curto Prazo (STFT): {cur_s:+.1f}%   |   ● Longo Prazo (LTFT): {cur_l:+.1f}%",
+                                 color="#e2e8f0", fontsize=9, loc="left", pad=4)
 
-                # Subplot 3: Trim Total & Vácuo MAP
-                raw_trm, _ = series("trim_total")
-                raw_map, cln_map = series("map_kpa")
-                cur_trm = latest.get("trim_total", 0.0)
-                cur_map = latest.get("map_kpa", 0.0)
-                ax = axes[2]
-                ax.plot(ts, raw_trm, color="#facc15", lw=1.8)
-                ax.axhline(0, color="gray40", lw=0.8)
-                ax.axhspan(-10, 10, color="#22c55e", alpha=0.08)
-                ax.set_ylim(-25.0, 25.0)
-                ax.set_ylabel("Trim Total %", color="#facc15", fontsize=8)
-                tw = ax.twinx()
-                tw.plot(ts, raw_map, color="#fb923c", lw=1.2)
-                tw.set_ylabel("MAP kPa", color="#fb923c", fontsize=8)
-                tw.set_ylim(10, 105)
-                tw.tick_params(colors="#94a3b8", labelsize=8)
-                ax.set_title(f"● Trim Total: {cur_trm:+.1f}%   |   ● Pressão Coletor (MAP): {cur_map:.0f} kPa",
-                             color="#e2e8f0", fontsize=9, loc="left", pad=4)
-                ax.set_xlabel("segundos decorridos", color="#94a3b8", fontsize=8)
+                    # Subplot 3: Trim Total & Vácuo MAP
+                    raw_trm, _ = series("trim_total")
+                    raw_map, cln_map = series("map_kpa")
+                    cur_trm = latest.get("trim_total", 0.0)
+                    cur_map = latest.get("map_kpa", 0.0)
+                    ax = axes[2]
+                    ax.plot(ts, raw_trm, color="#facc15", lw=1.8)
+                    ax.axhline(0, color="gray40", lw=0.8)
+                    ax.axhspan(-10, 10, color="#22c55e", alpha=0.08)
+                    ax.set_ylim(-25.0, 25.0)
+                    ax.set_ylabel("Trim Total %", color="#facc15", fontsize=8)
+                    tw = ax.twinx()
+                    tw.plot(ts, raw_map, color="#fb923c", lw=1.2)
+                    tw.set_ylabel("MAP kPa", color="#fb923c", fontsize=8)
+                    tw.set_ylim(10, 105)
+                    tw.tick_params(colors="#94a3b8", labelsize=8)
+                    ax.set_title(f"● Trim Total: {cur_trm:+.1f}%   |   ● Pressão Coletor (MAP): {cur_map:.0f} kPa",
+                                 color="#e2e8f0", fontsize=9, loc="left", pad=4)
+                    ax.set_xlabel("segundos decorridos", color="#94a3b8", fontsize=8)
 
-            elif preset_mode == "🌡️ Térmica":
-                # Subplot 1: Água do Arrefecimento
-                raw_clt, cln_clt = series("coolant_temp")
-                cur_clt = latest.get("coolant_temp", 0.0)
-                ax = axes[0]
-                ax.plot(ts, raw_clt, color="#f87171", lw=1.8)
-                ax.axhspan(82, 103, color="#22c55e", alpha=0.12)
-                max_clt = max(cln_clt) if cln_clt else 105
-                ax.set_ylim(bottom=0, top=max(115, max_clt + 10))
-                ax.set_ylabel("Água °C", color="#f87171", fontsize=8)
-                ax.set_title(f"● Temp. Líquido Arrefecimento: {cur_clt:.0f} °C   (Faixa Operacional: 82°C – 103°C)",
-                             color="#e2e8f0", fontsize=9, loc="left", pad=4)
+                elif "Térmica" in mode:
+                    # Subplot 1: Água do Arrefecimento
+                    raw_clt, cln_clt = series("coolant_temp")
+                    cur_clt = latest.get("coolant_temp", 0.0)
+                    ax = axes[0]
+                    ax.plot(ts, raw_clt, color="#f87171", lw=1.8)
+                    ax.axhspan(82, 103, color="#22c55e", alpha=0.12)
+                    max_clt = max(cln_clt) if cln_clt else 105
+                    ax.set_ylim(bottom=0, top=max(115, max_clt + 10))
+                    ax.set_ylabel("Água °C", color="#f87171", fontsize=8)
+                    ax.set_title(f"● Temp. Líquido Arrefecimento: {cur_clt:.0f} °C   (Faixa Operacional: 82°C – 103°C)",
+                                 color="#e2e8f0", fontsize=9, loc="left", pad=4)
 
-                # Subplot 2: Ar de Admissão IAT vs Ambiente
-                raw_iat, _ = series("intake_temp")
-                raw_amb, _ = series("ambient_temp")
-                cur_iat = latest.get("intake_temp", 0.0)
-                cur_amb = latest.get("ambient_temp", 0.0)
-                ax = axes[1]
-                ax.plot(ts, raw_iat, color="#38bdf8", lw=1.8, label="IAT")
-                ax.plot(ts, raw_amb, color="#4ade80", lw=1.2, ls="--", label="Ambiente")
-                ax.set_ylim(-10, 80)
-                ax.set_ylabel("Ar °C", color="#38bdf8", fontsize=8)
-                ax.set_title(f"● Temp. Ar Admissão (IAT): {cur_iat:.0f} °C   |   ● Temp. Ambiente: {cur_amb:.0f} °C",
-                             color="#e2e8f0", fontsize=9, loc="left", pad=4)
+                    # Subplot 2: Ar de Admissão IAT vs Ambiente
+                    raw_iat, _ = series("intake_temp")
+                    raw_amb, _ = series("ambient_temp")
+                    cur_iat = latest.get("intake_temp", 0.0)
+                    cur_amb = latest.get("ambient_temp", 0.0)
+                    ax = axes[1]
+                    ax.plot(ts, raw_iat, color="#38bdf8", lw=1.8, label="IAT")
+                    ax.plot(ts, raw_amb, color="#4ade80", lw=1.2, ls="--", label="Ambiente")
+                    ax.set_ylim(-10, 80)
+                    ax.set_ylabel("Ar °C", color="#38bdf8", fontsize=8)
+                    ax.set_title(f"● Temp. Ar Admissão (IAT): {cur_iat:.0f} °C   |   ● Temp. Ambiente: {cur_amb:.0f} °C",
+                                 color="#e2e8f0", fontsize=9, loc="left", pad=4)
 
-                # Subplot 3: Temperatura do Óleo vs RPM
-                raw_oil, cln_oil = series("oil_temp")
-                raw_rpm, cln_rpm = series("rpm")
-                cur_oil = latest.get("oil_temp", 0.0)
-                cur_rpm = latest.get("rpm", 0.0)
-                ax = axes[2]
-                ax.plot(ts, raw_oil, color="#fb923c", lw=1.8)
-                max_oil = max(cln_oil) if cln_oil else 110
-                ax.set_ylim(bottom=0, top=max(130, max_oil + 10))
-                ax.set_ylabel("Óleo °C", color="#fb923c", fontsize=8)
-                tw = ax.twinx()
-                tw.plot(ts, raw_rpm, color="#38bdf8", lw=1.0, ls=":")
-                max_rpm = max(cln_rpm) if cln_rpm else 1200
-                tw.set_ylim(bottom=0, top=max(1200, max_rpm * 1.15))
-                tw.set_ylabel("RPM", color="#38bdf8", fontsize=8)
-                tw.tick_params(colors="#94a3b8", labelsize=8)
-                ax.set_title(f"● Temp. Óleo do Motor: {cur_oil:.0f} °C   |   ● Rotação: {cur_rpm:.0f} RPM",
-                             color="#e2e8f0", fontsize=9, loc="left", pad=4)
-                ax.set_xlabel("segundos decorridos", color="#94a3b8", fontsize=8)
+                    # Subplot 3: Temperatura do Óleo vs RPM
+                    raw_oil, cln_oil = series("oil_temp")
+                    raw_rpm, cln_rpm = series("rpm")
+                    cur_oil = latest.get("oil_temp", 0.0)
+                    cur_rpm = latest.get("rpm", 0.0)
+                    ax = axes[2]
+                    ax.plot(ts, raw_oil, color="#fb923c", lw=1.8)
+                    max_oil = max(cln_oil) if cln_oil else 110
+                    ax.set_ylim(bottom=0, top=max(130, max_oil + 10))
+                    ax.set_ylabel("Óleo °C", color="#fb923c", fontsize=8)
+                    tw = ax.twinx()
+                    tw.plot(ts, raw_rpm, color="#38bdf8", lw=1.0, ls=":")
+                    max_rpm = max(cln_rpm) if cln_rpm else 1200
+                    tw.set_ylim(bottom=0, top=max(1200, max_rpm * 1.15))
+                    tw.set_ylabel("RPM", color="#38bdf8", fontsize=8)
+                    tw.tick_params(colors="#94a3b8", labelsize=8)
+                    ax.set_title(f"● Temp. Óleo do Motor: {cur_oil:.0f} °C   |   ● Rotação: {cur_rpm:.0f} RPM",
+                                 color="#e2e8f0", fontsize=9, loc="left", pad=4)
+                    ax.set_xlabel("segundos decorridos", color="#94a3b8", fontsize=8)
 
-            else:
-                # Padrão: 🎛️ Multicanal Geral (SEM ESCALA NEGATIVA PARA VELOCIDADE/RPM)
-                raw_rpm, cln_rpm = series("rpm")
-                raw_spd, cln_spd = series("speed")
-                cur_rpm = latest.get("rpm", 0.0)
-                cur_spd = latest.get("speed", 0.0)
-                ax = axes[0]
-                ax.plot(ts, raw_rpm, color="#38bdf8", lw=1.8)
-                max_rpm = max(cln_rpm) if cln_rpm else 1200
-                ax.set_ylim(bottom=0, top=max(1200, max_rpm * 1.15))
-                ax.set_ylabel("RPM", color="#38bdf8", fontsize=8)
-                tw = ax.twinx()
-                tw.plot(ts, raw_spd, color="#4ade80", lw=1.5)
-                max_spd = max(cln_spd) if cln_spd else 40
-                tw.set_ylim(bottom=0, top=max(40, max_spd * 1.15))
-                tw.set_ylabel("km/h", color="#4ade80", fontsize=8)
-                tw.tick_params(colors="#94a3b8", labelsize=8)
-                ax.set_title(f"● Rotação: {cur_rpm:.0f} RPM   |   ● Velocidade: {cur_spd:.0f} km/h",
-                             color="#e2e8f0", fontsize=9, loc="left", pad=4)
+                else:
+                    # Padrão: Multicanal Geral (SEM ESCALA NEGATIVA PARA VELOCIDADE/RPM)
+                    raw_rpm, cln_rpm = series("rpm")
+                    raw_spd, cln_spd = series("speed")
+                    cur_rpm = latest.get("rpm", 0.0)
+                    cur_spd = latest.get("speed", 0.0)
+                    ax = axes[0]
+                    ax.plot(ts, raw_rpm, color="#38bdf8", lw=1.8)
+                    max_rpm = max(cln_rpm) if cln_rpm else 1200
+                    ax.set_ylim(bottom=0, top=max(1200, max_rpm * 1.15))
+                    ax.set_ylabel("RPM", color="#38bdf8", fontsize=8)
+                    tw = ax.twinx()
+                    tw.plot(ts, raw_spd, color="#4ade80", lw=1.5)
+                    max_spd = max(cln_spd) if cln_spd else 40
+                    tw.set_ylim(bottom=0, top=max(40, max_spd * 1.15))
+                    tw.set_ylabel("km/h", color="#4ade80", fontsize=8)
+                    tw.tick_params(colors="#94a3b8", labelsize=8)
+                    ax.set_title(f"● Rotação: {cur_rpm:.0f} RPM   |   ● Velocidade: {cur_spd:.0f} km/h",
+                                 color="#e2e8f0", fontsize=9, loc="left", pad=4)
 
-                # Subplot 2: Água e Trim Total
-                raw_clt, cln_clt = series("coolant_temp")
-                raw_trm, _ = series("trim_total")
-                cur_clt = latest.get("coolant_temp", 0.0)
-                cur_trm = latest.get("trim_total", 0.0)
-                ax = axes[1]
-                ax.plot(ts, raw_clt, color="#f87171", lw=1.8)
-                ax.axhspan(82, 103, color="#22c55e", alpha=0.10)
-                max_clt = max(cln_clt) if cln_clt else 105
-                ax.set_ylim(bottom=0, top=max(115, max_clt + 10))
-                ax.set_ylabel("Água °C", color="#f87171", fontsize=8)
-                tw = ax.twinx()
-                tw.plot(ts, raw_trm, color="#facc15", lw=1.3, ls=":")
-                tw.axhline(0, color="gray40", lw=0.8)
-                lim = self.active_tolerances.get("fuel_trim_total", {"max": 10})["max"]
-                tw.axhline(lim, color=RED, ls="--", alpha=0.6)
-                tw.axhline(-lim, color=RED, ls="--", alpha=0.6)
-                tw.set_ylim(-25.0, 25.0)
-                tw.set_ylabel("Trim %", color="#facc15", fontsize=8)
-                tw.tick_params(colors="#94a3b8", labelsize=8)
-                ax.set_title(f"● Temperatura Água: {cur_clt:.0f} °C   |   ● Trim Total (STFT+LTFT): {cur_trm:+.1f} %",
-                             color="#e2e8f0", fontsize=9, loc="left", pad=4)
+                    # Subplot 2: Água e Trim Total
+                    raw_clt, cln_clt = series("coolant_temp")
+                    raw_trm, _ = series("trim_total")
+                    cur_clt = latest.get("coolant_temp", 0.0)
+                    cur_trm = latest.get("trim_total", 0.0)
+                    ax = axes[1]
+                    ax.plot(ts, raw_clt, color="#f87171", lw=1.8)
+                    ax.axhspan(82, 103, color="#22c55e", alpha=0.10)
+                    max_clt = max(cln_clt) if cln_clt else 105
+                    ax.set_ylim(bottom=0, top=max(115, max_clt + 10))
+                    ax.set_ylabel("Água °C", color="#f87171", fontsize=8)
+                    tw = ax.twinx()
+                    tw.plot(ts, raw_trm, color="#facc15", lw=1.3, ls=":")
+                    tw.axhline(0, color="gray40", lw=0.8)
+                    lim = self.active_tolerances.get("fuel_trim_total", {"max": 10})["max"]
+                    tw.axhline(lim, color=RED, ls="--", alpha=0.6)
+                    tw.axhline(-lim, color=RED, ls="--", alpha=0.6)
+                    tw.set_ylim(-25.0, 25.0)
+                    tw.set_ylabel("Trim %", color="#facc15", fontsize=8)
+                    tw.tick_params(colors="#94a3b8", labelsize=8)
+                    ax.set_title(f"● Temperatura Água: {cur_clt:.0f} °C   |   ● Trim Total (STFT+LTFT): {cur_trm:+.1f} %",
+                                 color="#e2e8f0", fontsize=9, loc="left", pad=4)
 
-                # Subplot 3: Bateria e Sonda Lambda
-                raw_bat, _ = series("battery_voltage")
-                raw_o2, _ = series("o2_b1s1")
-                cur_bat = latest.get("battery_voltage", 0.0)
-                cur_o2 = latest.get("o2_b1s1", 0.0)
-                ax = axes[2]
-                ax.plot(ts, raw_bat, color="#facc15", lw=1.8)
-                ax.axhspan(13.5, 14.8, color="#22c55e", alpha=0.12)
-                ax.axhspan(11.8, 12.8, color="#38bdf8", alpha=0.08)
-                ax.set_ylim(10.0, 16.0)
-                ax.set_ylabel("Bateria V", color="#facc15", fontsize=8)
-                tw = ax.twinx()
-                tw.plot(ts, raw_o2, color="#2dd4bf", lw=1.4)
-                tw.axhline(0.1, color="gray40", ls=":", lw=0.8)
-                tw.axhline(0.9, color="gray40", ls=":", lw=0.8)
-                tw.set_ylim(0.0, 1.05)
-                tw.set_ylabel("Sonda V", color="#2dd4bf", fontsize=8)
-                tw.tick_params(colors="#94a3b8", labelsize=8)
-                ax.set_title(f"● Tensão Bateria: {cur_bat:.1f} V (Alternador/Chave)   |   ● Sonda Lambda: {cur_o2:.2f} V",
-                             color="#e2e8f0", fontsize=9, loc="left", pad=4)
-                ax.set_xlabel("segundos decorridos", color="#94a3b8", fontsize=8)
+                    # Subplot 3: Bateria e Sonda Lambda
+                    raw_bat, _ = series("battery_voltage")
+                    raw_o2, _ = series("o2_b1s1")
+                    cur_bat = latest.get("battery_voltage", 0.0)
+                    cur_o2 = latest.get("o2_b1s1", 0.0)
+                    ax = axes[2]
+                    ax.plot(ts, raw_bat, color="#facc15", lw=1.8)
+                    ax.axhspan(13.5, 14.8, color="#22c55e", alpha=0.12)
+                    ax.axhspan(11.8, 12.8, color="#38bdf8", alpha=0.08)
+                    ax.set_ylim(10.0, 16.0)
+                    ax.set_ylabel("Bateria V", color="#facc15", fontsize=8)
+                    tw = ax.twinx()
+                    tw.plot(ts, raw_o2, color="#2dd4bf", lw=1.4)
+                    tw.axhline(0.1, color="gray40", ls=":", lw=0.8)
+                    tw.axhline(0.9, color="gray40", ls=":", lw=0.8)
+                    tw.set_ylim(0.0, 1.05)
+                    tw.set_ylabel("Sonda V", color="#2dd4bf", fontsize=8)
+                    tw.tick_params(colors="#94a3b8", labelsize=8)
+                    ax.set_title(f"● Tensão Bateria: {cur_bat:.1f} V (Alternador/Chave)   |   ● Sonda Lambda: {cur_o2:.2f} V",
+                                 color="#e2e8f0", fontsize=9, loc="left", pad=4)
+                    ax.set_xlabel("segundos decorridos", color="#94a3b8", fontsize=8)
 
-        fig.tight_layout()
-        self.canvas.draw_idle()
+            fig.tight_layout()
+            self.canvas.draw()
+        finally:
+            self._chart_rendering = False
 
     # ==========================================================
     # PÁGINA: COMPARATIVO ANTES & DEPOIS
