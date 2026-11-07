@@ -26,7 +26,6 @@ ENV/
 # PyInstaller & Inno Setup Builds
 build/
 dist/
-installer_output/
 *.pyd
 *.exe
 !releases/*.exe
