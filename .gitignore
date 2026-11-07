@@ -29,4 +29,5 @@ dist/
 installer_output/
 *.pyd
 *.exe
+!releases/*.exe
 
